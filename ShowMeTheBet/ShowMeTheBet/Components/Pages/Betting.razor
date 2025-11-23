@@ -1,0 +1,90 @@
+@page "/"
+@using ShowMeTheBet.Models
+@using ShowMeTheBet.Services
+@inject BettingService BettingService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>ShowMeTheBet</PageTitle>
+
+@if (!AuthService.IsAuthenticated)
+{
+    <div class="auth-required">
+        <div class="auth-message">
+            <h2>로그인이 필요합니다</h2>
+            <p>베팅을 하려면 먼저 로그인해주세요.</p>
+            <button class="btn btn-primary" @onclick="NavigateToLogin">로그인하기</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="main-container">
+        <div class="main-header">
+            <h1>⚽ ShowMeTheBet</h1>
+            <div class="balance-display">
+                <span class="balance-label">잔액:</span>
+                <span class="balance-amount">@balance.ToString("N0") 원</span>
+            </div>
+        </div>
+
+        <div class="games-menu">
+            <h2>게임 선택</h2>
+            <div class="games-grid">
+                <div class="game-card" @onclick="NavigateToSports">
+                    <div class="game-icon">⚽</div>
+                    <h3>스포츠 토토</h3>
+                    <p>실시간 경기 베팅</p>
+                    <div class="game-badge">스포츠</div>
+                </div>
+
+                <div class="game-card" @onclick="NavigateToOddEven">
+                    <div class="game-icon">🎲</div>
+                    <h3>홀짝</h3>
+                    <p>30초마다 결과 발표</p>
+                    <div class="game-badge">x2.0</div>
+                </div>
+
+                <div class="game-card" @onclick="NavigateToGraph">
+                    <div class="game-icon">📈</div>
+                    <h3>그래프</h3>
+                    <p>배수 게임 (x1 ~ x5)</p>
+                    <div class="game-badge">배수</div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private decimal balance = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthService.IsAuthenticated)
+        {
+            balance = await BettingService.GetBalanceAsync();
+        }
+    }
+
+    private void NavigateToLogin()
+    {
+        Navigation.NavigateTo("/login");
+    }
+
+    private void NavigateToSports()
+    {
+        Navigation.NavigateTo("/sports");
+    }
+
+    private void NavigateToOddEven()
+    {
+        Navigation.NavigateTo("/oddeven");
+    }
+
+    private void NavigateToGraph()
+    {
+        Navigation.NavigateTo("/graph");
+    }
+}

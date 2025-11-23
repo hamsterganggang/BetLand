@@ -1,0 +1,88 @@
+@using ShowMeTheBet.Models
+
+<div class="betslip">
+    <h3>베팅 슬립</h3>
+    @if (Bets.Count == 0)
+    {
+        <div class="empty-betslip">
+            <p>선택한 베팅이 없습니다.</p>
+            <p class="text-muted">경기를 선택하여 베팅하세요.</p>
+        </div>
+    }
+    else
+    {
+        <div class="bets-list">
+            @foreach (var bet in Bets)
+            {
+                <div class="bet-item">
+                    <div class="bet-header">
+                        <span class="bet-type">@GetBetTypeText(bet.Type)</span>
+                        <button class="remove-btn" @onclick="() => OnRemove.InvokeAsync(bet.MatchId)">×</button>
+                    </div>
+                    <div class="bet-info">@bet.MatchInfo</div>
+                    <div class="bet-odds">배당률: @bet.Odds.ToString("F2")</div>
+                    <div class="bet-amount-input">
+                        <label>베팅 금액:</label>
+                        <input type="number" 
+                               class="form-control" 
+                               value="@bet.Amount" 
+                               @oninput="@((ChangeEventArgs e) => UpdateAmount(bet, e))"
+                               min="1000" 
+                               step="1000"
+                               placeholder="금액 입력" />
+                    </div>
+                    @if (bet.Amount > 0)
+                    {
+                        <div class="potential-win">
+                            예상 당첨금: <strong>@((bet.Amount * bet.Odds).ToString("N0")) 원</strong>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+        <div class="betslip-footer">
+            <div class="total-info">
+                <div>총 베팅: <strong>@Bets.Where(b => b.Amount > 0).Sum(b => b.Amount).ToString("N0") 원</strong></div>
+                <div>예상 당첨금: <strong>@Bets.Where(b => b.Amount > 0).Sum(b => b.Amount * b.Odds).ToString("N0") 원</strong></div>
+            </div>
+            <button class="btn btn-primary btn-bet" 
+                    @onclick="() => OnPlaceBets.InvokeAsync()"
+                    disabled="@(Bets.All(b => b.Amount <= 0))">
+                베팅하기
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public List<BetSlipItem> Bets { get; set; } = new();
+    [Parameter] public EventCallback<int> OnRemove { get; set; }
+    [Parameter] public EventCallback OnPlaceBets { get; set; }
+
+    private string GetBetTypeText(BetType type) => type switch
+    {
+        BetType.Home => "홈 승",
+        BetType.Draw => "무승부",
+        BetType.Away => "원정 승",
+        _ => ""
+    };
+
+    private void UpdateAmount(BetSlipItem bet, ChangeEventArgs e)
+    {
+        if (decimal.TryParse(e.Value?.ToString(), out var amount))
+        {
+            bet.Amount = amount;
+            StateHasChanged();
+        }
+    }
+
+    public class BetSlipItem
+    {
+        public int MatchId { get; set; }
+        public string MatchInfo { get; set; } = string.Empty;
+        public BetType Type { get; set; }
+        public decimal Odds { get; set; }
+        public decimal Amount { get; set; }
+    }
+}
+

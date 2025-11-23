@@ -1,0 +1,224 @@
+@page "/oddeven"
+@using ShowMeTheBet.Models
+@using ShowMeTheBet.Services
+@inject GameService GameService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+
+<PageTitle>홀짝 게임 - ShowMeTheBet</PageTitle>
+
+@if (!AuthService.IsAuthenticated)
+{
+    <div class="auth-required">
+        <div class="auth-message">
+            <h2>로그인이 필요합니다</h2>
+            <p>게임을 하려면 먼저 로그인해주세요.</p>
+            <button class="btn btn-primary" @onclick="NavigateToLogin">로그인하기</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="game-container">
+        <div class="game-header">
+            <h1>🎲 홀짝 게임</h1>
+            <div class="balance-display">
+                <span class="balance-label">잔액:</span>
+                <span class="balance-amount">@balance.ToString("N0") 원</span>
+            </div>
+        </div>
+
+        <div class="game-content">
+            <div class="game-main">
+                <div class="round-info">
+                    <h2>다음 라운드까지</h2>
+                    <div class="countdown">@timeLeft 초</div>
+                    <div class="current-result">
+                        <span class="result-label">현재 결과:</span>
+                        <span class="result-value @(currentResult == "홀" ? "odd" : "even")">@currentResult</span>
+                    </div>
+                </div>
+
+                <div class="bet-section">
+                    <h3>베팅하기</h3>
+                    <div class="bet-amount-input">
+                        <label>베팅 금액:</label>
+                        <input type="number" 
+                               class="form-control" 
+                               @bind="betAmount" 
+                               @bind:event="oninput"
+                               min="1000" 
+                               step="1000"
+                               placeholder="금액 입력" />
+                    </div>
+                    <div class="bet-buttons">
+                        <button class="btn btn-odd @(selectedChoice == "홀" ? "selected" : "")" 
+                                @onclick="SelectOdd"
+                                disabled="@(timeLeft < 5 || isLoading)">
+                            홀 (x2.0)
+                        </button>
+                        <button class="btn btn-even @(selectedChoice == "짝" ? "selected" : "")" 
+                                @onclick="SelectEven"
+                                disabled="@(timeLeft < 5 || isLoading)">
+                            짝 (x2.0)
+                        </button>
+                    </div>
+                    @if (selectedChoice != "" && betAmount > 0)
+                    {
+                        <div class="bet-summary">
+                            <p>선택: <strong>@selectedChoice</strong></p>
+                            <p>베팅 금액: <strong>@betAmount.ToString("N0") 원</strong></p>
+                            <p>예상 당첨금: <strong>@((betAmount * 2).ToString("N0")) 원</strong></p>
+                        </div>
+                    }
+                    <button class="btn btn-primary btn-bet" 
+                            @onclick="PlaceBet"
+                            disabled="@(IsBetDisabled())">
+                        @if (isLoading)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        베팅하기
+                    </button>
+                </div>
+            </div>
+
+            <div class="game-history">
+                <h3>베팅 내역</h3>
+                @if (bets == null || bets.Count == 0)
+                {
+                    <div class="empty-history">
+                        <p>베팅 내역이 없습니다.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="bets-list">
+                        @foreach (var bet in bets)
+                        {
+                            <div class="bet-item @bet.Status.ToString().ToLower()">
+                                <div class="bet-info">
+                                    <span class="bet-choice">@bet.BetChoice</span>
+                                    <span class="bet-amount">@bet.Amount.ToString("N0") 원</span>
+                                </div>
+                                <div class="bet-result">
+                                    <span class="result">결과: @bet.Result</span>
+                                    @if (bet.Status == GameBetStatus.Won)
+                                    {
+                                        <span class="win-amount">+@bet.WinAmount.ToString("N0") 원</span>
+                                    }
+                                    else if (bet.Status == GameBetStatus.Lost)
+                                    {
+                                        <span class="lose-amount">-@bet.Amount.ToString("N0") 원</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="pending">대기중...</span>
+                                    }
+                                </div>
+                                <div class="bet-time">@bet.BetTime.ToString("HH:mm:ss")</div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private decimal balance = 0;
+    private int timeLeft = 30;
+    private string currentResult = "홀";
+    private string selectedChoice = "";
+    private decimal betAmount = 0;
+    private bool isLoading = false;
+    private List<GameBet>? bets;
+    private System.Threading.Timer? timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthService.IsAuthenticated)
+        {
+            await LoadData();
+            StartTimer();
+        }
+    }
+
+    private async Task LoadData()
+    {
+        balance = await GameService.GetBalanceAsync();
+        timeLeft = await GameService.GetTimeUntilNextRoundAsync();
+        currentResult = await GameService.GetCurrentOddEvenResultAsync();
+        bets = await GameService.GetOddEvenBetsAsync();
+    }
+
+    private void StartTimer()
+    {
+        timer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                timeLeft = await GameService.GetTimeUntilNextRoundAsync();
+                if (timeLeft == 30)
+                {
+                    currentResult = await GameService.GetCurrentOddEvenResultAsync();
+                    bets = await GameService.GetOddEvenBetsAsync();
+                    balance = await GameService.GetBalanceAsync();
+                }
+                StateHasChanged();
+            });
+        }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+    }
+
+    private void SelectOdd()
+    {
+        selectedChoice = "홀";
+    }
+
+    private void SelectEven()
+    {
+        selectedChoice = "짝";
+    }
+
+    private bool IsBetDisabled()
+    {
+        return selectedChoice == "" || betAmount <= 0 || timeLeft < 5 || isLoading;
+    }
+
+    private async Task PlaceBet()
+    {
+        if (selectedChoice == "" || betAmount <= 0) return;
+
+        isLoading = true;
+        try
+        {
+            var success = await GameService.PlaceOddEvenBetAsync(selectedChoice, betAmount);
+            if (success)
+            {
+                selectedChoice = "";
+                betAmount = 0;
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void NavigateToLogin()
+    {
+        Navigation.NavigateTo("/login");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (timer != null)
+        {
+            await timer.DisposeAsync();
+        }
+    }
+}

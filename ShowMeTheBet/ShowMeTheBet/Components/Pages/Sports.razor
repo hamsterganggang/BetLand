@@ -1,0 +1,136 @@
+@page "/sports"
+@using ShowMeTheBet.Models
+@using ShowMeTheBet.Services
+@inject BettingService BettingService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>스포츠 토토 - ShowMeTheBet</PageTitle>
+
+@if (!AuthService.IsAuthenticated)
+{
+    <div class="auth-required">
+        <div class="auth-message">
+            <h2>로그인이 필요합니다</h2>
+            <p>베팅을 하려면 먼저 로그인해주세요.</p>
+            <button class="btn btn-primary" @onclick="NavigateToLogin">로그인하기</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="betting-container">
+        <div class="betting-header">
+            <h1>⚽ 스포츠 토토</h1>
+            <div class="balance-display">
+                <span class="balance-label">잔액:</span>
+                <span class="balance-amount">@balance.ToString("N0") 원</span>
+            </div>
+        </div>
+
+        <div class="betting-content">
+            <div class="matches-section">
+                <h2>경기 목록</h2>
+                <div class="matches-list">
+                    @if (matches != null)
+                    {
+                        @foreach (var match in matches)
+                        {
+                            <div class="match-card">
+                                <div class="match-header">
+                                    <span class="league-badge">@match.League</span>
+                                    <span class="match-time">@match.MatchTime.ToString("MM/dd HH:mm")</span>
+                                </div>
+                                <div class="match-teams">
+                                    <div class="team-section">
+                                        <div class="team-name">@match.HomeTeam</div>
+                                        <button class="odds-btn @(selectedBets.Any(b => b.MatchId == match.Id && b.Type == BetType.Home) ? "selected" : "")"
+                                                @onclick="() => SelectBet(match.Id, BetType.Home, match.HomeOdds, match.HomeTeam, match.AwayTeam)">
+                                            <span class="odds-value">@match.HomeOdds.ToString("F2")</span>
+                                        </button>
+                                    </div>
+                                    <div class="team-section">
+                                        <div class="team-name draw">무승부</div>
+                                        <button class="odds-btn @(selectedBets.Any(b => b.MatchId == match.Id && b.Type == BetType.Draw) ? "selected" : "")"
+                                                @onclick="() => SelectBet(match.Id, BetType.Draw, match.DrawOdds, match.HomeTeam, match.AwayTeam)">
+                                            <span class="odds-value">@match.DrawOdds.ToString("F2")</span>
+                                        </button>
+                                    </div>
+                                    <div class="team-section">
+                                        <div class="team-name">@match.AwayTeam</div>
+                                        <button class="odds-btn @(selectedBets.Any(b => b.MatchId == match.Id && b.Type == BetType.Away) ? "selected" : "")"
+                                                @onclick="() => SelectBet(match.Id, BetType.Away, match.AwayOdds, match.HomeTeam, match.AwayTeam)">
+                                            <span class="odds-value">@match.AwayOdds.ToString("F2")</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            <div class="betslip-section">
+                <BetSlip Bets="@selectedBets" OnRemove="@RemoveBet" OnPlaceBets="@PlaceBets" />
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<BetSlip.BetSlipItem> selectedBets = new();
+    private List<Match>? matches;
+    private decimal balance = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthService.IsAuthenticated)
+        {
+            matches = await BettingService.GetMatchesAsync();
+            balance = await BettingService.GetBalanceAsync();
+        }
+    }
+
+    private void SelectBet(int matchId, BetType type, decimal odds, string homeTeam, string awayTeam)
+    {
+        var existing = selectedBets.FirstOrDefault(b => b.MatchId == matchId);
+        if (existing != null)
+        {
+            selectedBets.Remove(existing);
+        }
+        
+        selectedBets.Add(new BetSlip.BetSlipItem
+        {
+            MatchId = matchId,
+            MatchInfo = $"{homeTeam} vs {awayTeam}",
+            Type = type,
+            Odds = odds,
+            Amount = 0
+        });
+        StateHasChanged();
+    }
+
+    private void RemoveBet(int matchId)
+    {
+        selectedBets.RemoveAll(b => b.MatchId == matchId);
+        StateHasChanged();
+    }
+
+    private async Task PlaceBets()
+    {
+        foreach (var bet in selectedBets.Where(b => b.Amount > 0))
+        {
+            await BettingService.PlaceBetAsync(bet.MatchId, bet.Type, bet.Amount);
+        }
+        selectedBets.Clear();
+        balance = await BettingService.GetBalanceAsync();
+        StateHasChanged();
+    }
+
+    private void NavigateToLogin()
+    {
+        Navigation.NavigateTo("/login");
+    }
+}
+

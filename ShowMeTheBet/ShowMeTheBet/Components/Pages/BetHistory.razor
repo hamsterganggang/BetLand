@@ -1,0 +1,131 @@
+@page "/history"
+@using ShowMeTheBet.Models
+@using ShowMeTheBet.Services
+@inject BettingService BettingService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>베팅 내역 - ShowMeTheBet</PageTitle>
+
+@if (!AuthService.IsAuthenticated)
+{
+    <div class="auth-required">
+        <div class="auth-message">
+            <h2>로그인이 필요합니다</h2>
+            <p>베팅 내역을 보려면 먼저 로그인해주세요.</p>
+            <button class="btn btn-primary" @onclick="NavigateToLogin">로그인하기</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="history-container">
+        <div class="history-header">
+            <h1>📋 베팅 내역</h1>
+            <div class="balance-display">
+                <span class="balance-label">잔액:</span>
+                <span class="balance-amount">@balance.ToString("N0") 원</span>
+            </div>
+        </div>
+
+        @if (bets == null || bets.Count == 0)
+        {
+            <div class="empty-history">
+                <p>베팅 내역이 없습니다.</p>
+            </div>
+        }
+        else
+        {
+            <div class="bets-table">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>경기</th>
+                            <th>베팅 타입</th>
+                            <th>배당률</th>
+                            <th>베팅 금액</th>
+                            <th>예상 당첨금</th>
+                            <th>상태</th>
+                            <th>베팅 시간</th>
+                            <th>작업</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (bets != null)
+                        {
+                            @foreach (var bet in bets)
+                            {
+                                <tr>
+                                    <td>@bet.MatchInfo</td>
+                                    <td>@GetBetTypeText(bet.Type)</td>
+                                    <td>@bet.Odds.ToString("F2")</td>
+                                    <td>@bet.Amount.ToString("N0") 원</td>
+                                    <td>@bet.PotentialWin.ToString("N0") 원</td>
+                                    <td>
+                                        <span class="status-badge status-@bet.Status.ToString().ToLower()">
+                                            @GetStatusText(bet.Status)
+                                        </span>
+                                    </td>
+                                    <td>@bet.BetTime.ToString("MM/dd HH:mm")</td>
+                                    <td>
+                                        @if (bet.Status == BetStatus.Pending)
+                                        {
+                                            <button class="btn btn-sm btn-danger" @onclick="() => CancelBet(bet.Id)">
+                                                취소
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<Bet>? bets;
+    private decimal balance = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthService.IsAuthenticated)
+        {
+            bets = await BettingService.GetBetsAsync();
+            balance = await BettingService.GetBalanceAsync();
+        }
+    }
+
+    private string GetBetTypeText(BetType type) => type switch
+    {
+        BetType.Home => "홈 승",
+        BetType.Draw => "무승부",
+        BetType.Away => "원정 승",
+        _ => ""
+    };
+
+    private string GetStatusText(BetStatus status) => status switch
+    {
+        BetStatus.Pending => "대기중",
+        BetStatus.Won => "승리",
+        BetStatus.Lost => "패배",
+        _ => ""
+    };
+
+    private async Task CancelBet(int betId)
+    {
+        await BettingService.RemoveBetAsync(betId);
+        bets = await BettingService.GetBetsAsync();
+        balance = await BettingService.GetBalanceAsync();
+        StateHasChanged();
+    }
+
+    private void NavigateToLogin()
+    {
+        Navigation.NavigateTo("/login");
+    }
+}
+

@@ -1,0 +1,76 @@
+﻿<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/">⚽ ShowMeTheBet</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+@using ShowMeTheBet.Services
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+    <nav class="nav flex-column">
+        @if (AuthService.IsAuthenticated)
+        {
+            <div class="nav-item px-3">
+                <div class="nav-user-info">
+                    <span class="nav-username">@AuthService.CurrentUser?.Username</span>
+                </div>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                    <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> 홈
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="sports">
+                    <span class="bi bi-trophy" aria-hidden="true"></span> 스포츠 토토
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="oddeven">
+                    <span class="bi bi-dice-6" aria-hidden="true"></span> 홀짝
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="graph">
+                    <span class="bi bi-graph-up" aria-hidden="true"></span> 그래프
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="history">
+                    <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> 베팅 내역
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <a class="nav-link" href="#" @onclick="HandleLogout" @onclick:preventDefault>
+                    <span class="bi bi-box-arrow-right" aria-hidden="true"></span> 로그아웃
+                </a>
+            </div>
+        }
+        else
+        {
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="login">
+                    <span class="bi bi-box-arrow-in-right" aria-hidden="true"></span> 로그인
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="register">
+                    <span class="bi bi-person-plus" aria-hidden="true"></span> 회원가입
+                </NavLink>
+            </div>
+        }
+    </nav>
+
+@code {
+    private void HandleLogout()
+    {
+        AuthService.Logout();
+        Navigation.NavigateTo("/login");
+    }
+}
+</div>
+

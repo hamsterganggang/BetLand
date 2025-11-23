@@ -1,0 +1,104 @@
+@page "/login"
+@using ShowMeTheBet.Services
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>로그인 - ShowMeTheBet</PageTitle>
+
+<div class="login-container">
+    <div class="login-card">
+        <div class="login-header">
+            <h1>⚽ ShowMeTheBet</h1>
+            <p class="text-muted">스포츠 베팅에 오신 것을 환영합니다</p>
+        </div>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger" role="alert">
+                @errorMessage
+            </div>
+        }
+
+            <div class="login-form">
+                <h3>로그인</h3>
+                <div class="mb-3">
+                    <label for="username" class="form-label">사용자명</label>
+                    <input type="text" class="form-control" id="username" @bind="username" placeholder="사용자명을 입력하세요" />
+                </div>
+                <div class="mb-3">
+                    <label for="password" class="form-label">비밀번호</label>
+                    <input type="password" class="form-control" id="password" @bind="password" @onkeypress="HandleKeyPress" placeholder="비밀번호를 입력하세요" />
+                </div>
+                <button class="btn btn-primary w-100 mb-3" @onclick="HandleLogin" disabled="@isLoading">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                    }
+                    로그인
+                </button>
+                <div class="text-center">
+                    <p class="mb-0">계정이 없으신가요? <a href="/register">회원가입</a></p>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private string username = string.Empty;
+    private string password = string.Empty;
+    private string errorMessage = string.Empty;
+    private bool isLoading = false;
+
+    protected override void OnInitialized()
+    {
+        if (AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/");
+        }
+    }
+
+    private async Task HandleLogin()
+    {
+        errorMessage = string.Empty;
+        
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+        {
+            errorMessage = "사용자명과 비밀번호를 입력해주세요.";
+            return;
+        }
+
+        isLoading = true;
+        try
+        {
+            var success = await AuthService.LoginAsync(username, password);
+            if (success)
+            {
+                Navigation.NavigateTo("/");
+            }
+            else
+            {
+                errorMessage = "사용자명 또는 비밀번호가 올바르지 않습니다.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "로그인 중 오류가 발생했습니다: " + ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await HandleLogin();
+        }
+    }
+}
+

@@ -1,0 +1,222 @@
+@page "/graph"
+@using ShowMeTheBet.Models
+@using ShowMeTheBet.Services
+@inject GameService GameService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+
+<PageTitle>그래프 게임 - ShowMeTheBet</PageTitle>
+
+@if (!AuthService.IsAuthenticated)
+{
+    <div class="auth-required">
+        <div class="auth-message">
+            <h2>로그인이 필요합니다</h2>
+            <p>게임을 하려면 먼저 로그인해주세요.</p>
+            <button class="btn btn-primary" @onclick="NavigateToLogin">로그인하기</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="game-container">
+        <div class="game-header">
+            <h1>📈 그래프 게임</h1>
+            <div class="balance-display">
+                <span class="balance-label">잔액:</span>
+                <span class="balance-amount">@balance.ToString("N0") 원</span>
+            </div>
+        </div>
+
+        <div class="game-content">
+            <div class="game-main">
+                <div class="graph-section">
+                    <h3>현재 배수</h3>
+                    <div class="graph-container">
+                        <div class="graph-bar" style="height: @(currentMultiplier * 20)%">
+                            <div class="graph-value">x@(currentMultiplier.ToString("F1"))</div>
+                        </div>
+                    </div>
+                    <div class="multiplier-display">
+                        <span class="multiplier-label">배수:</span>
+                        <span class="multiplier-value">x@(currentMultiplier.ToString("F1"))</span>
+                    </div>
+                </div>
+
+                <div class="bet-section">
+                    <h3>베팅하기</h3>
+                    <div class="bet-amount-input">
+                        <label>베팅 금액:</label>
+                        <input type="number" 
+                               class="form-control" 
+                               @bind="betAmount" 
+                               @bind:event="oninput"
+                               min="1000" 
+                               step="1000"
+                               placeholder="금액 입력"
+                               disabled="@isGameRunning" />
+                    </div>
+                    <div class="game-controls">
+                        @if (!isGameRunning)
+                        {
+                            <button class="btn btn-success btn-start" @onclick="StartGame" disabled="@(betAmount <= 0 || isLoading)">
+                                게임 시작
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-danger btn-stop" @onclick="StopGame" disabled="@isLoading">
+                                STOP!
+                            </button>
+                        }
+                    </div>
+                    @if (betAmount > 0 && currentMultiplier > 1.0m)
+                    {
+                        <div class="bet-summary">
+                            <p>베팅 금액: <strong>@betAmount.ToString("N0") 원</strong></p>
+                            <p>현재 배수: <strong>x@(currentMultiplier.ToString("F1"))</strong></p>
+                            <p>예상 당첨금: <strong>@((betAmount * currentMultiplier).ToString("N0")) 원</strong></p>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="game-history">
+                <h3>베팅 내역</h3>
+                @if (bets == null || bets.Count == 0)
+                {
+                    <div class="empty-history">
+                        <p>베팅 내역이 없습니다.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="bets-list">
+                        @foreach (var bet in bets)
+                        {
+                            <div class="bet-item won">
+                                <div class="bet-info">
+                                    <span class="bet-multiplier">x@(bet.Multiplier.ToString("F1"))</span>
+                                    <span class="bet-amount">@bet.Amount.ToString("N0") 원</span>
+                                </div>
+                                <div class="bet-result">
+                                    <span class="win-amount">+@((bet.WinAmount - bet.Amount).ToString("N0")) 원</span>
+                                </div>
+                                <div class="bet-time">@bet.BetTime.ToString("HH:mm:ss")</div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private decimal balance = 0;
+    private decimal currentMultiplier = 1.0m;
+    private decimal betAmount = 0;
+    private bool isGameRunning = false;
+    private bool isLoading = false;
+    private List<GameBet>? bets;
+    private System.Threading.Timer? timer;
+    private const decimal MinMultiplier = 1.0m;
+    private const decimal MaxMultiplier = 5.0m;
+    private const decimal MultiplierStep = 0.1m;
+    private bool isIncreasing = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthService.IsAuthenticated)
+        {
+            await LoadData();
+        }
+    }
+
+    private async Task LoadData()
+    {
+        balance = await GameService.GetBalanceAsync();
+        bets = await GameService.GetGraphBetsAsync();
+    }
+
+    private void StartGame()
+    {
+        if (betAmount <= 0) return;
+
+        isGameRunning = true;
+        currentMultiplier = MinMultiplier;
+        isIncreasing = true;
+
+        timer = new System.Threading.Timer(_ =>
+        {
+            InvokeAsync(() =>
+            {
+                if (isGameRunning)
+                {
+                    if (isIncreasing)
+                    {
+                        currentMultiplier += MultiplierStep;
+                        if (currentMultiplier >= MaxMultiplier)
+                        {
+                            isIncreasing = false;
+                        }
+                    }
+                    else
+                    {
+                        currentMultiplier -= MultiplierStep;
+                        if (currentMultiplier <= MinMultiplier)
+                        {
+                            isIncreasing = true;
+                        }
+                    }
+                    StateHasChanged();
+                }
+            });
+        }, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(50));
+    }
+
+    private async Task StopGame()
+    {
+        if (!isGameRunning || betAmount <= 0) return;
+
+        isGameRunning = false;
+        isLoading = true;
+
+        if (timer != null)
+        {
+            await timer.DisposeAsync();
+            timer = null;
+        }
+
+        try
+        {
+            var success = await GameService.PlaceGraphBetAsync(betAmount, currentMultiplier);
+            if (success)
+            {
+                betAmount = 0;
+                currentMultiplier = MinMultiplier;
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void NavigateToLogin()
+    {
+        Navigation.NavigateTo("/login");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (timer != null)
+        {
+            await timer.DisposeAsync();
+        }
+    }
+}
+
