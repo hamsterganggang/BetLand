@@ -17,6 +17,7 @@ public class AuthService
 
     public User? CurrentUser => _currentUser;
     public bool IsAuthenticated => _currentUser != null;
+    public event Action? OnAuthStateChanged;
 
     public async Task<bool> RegisterAsync(string username, string email, string password)
     {
@@ -49,12 +50,14 @@ public class AuthService
         }
 
         _currentUser = user;
+        OnAuthStateChanged?.Invoke();
         return true;
     }
 
     public void Logout()
     {
         _currentUser = null;
+        OnAuthStateChanged?.Invoke();
     }
 
     public async Task<User?> GetUserAsync(int userId)

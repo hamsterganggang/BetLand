@@ -1,16 +1,54 @@
 ﻿@inherits LayoutComponentBase
+@using ShowMeTheBet.Services
+@inject AuthService AuthService
+@inject NavigationManager Navigation
 
 <div class="page">
-    <div class="sidebar">
-        <NavMenu />
+    <div class="top-navbar">
+        <div class="navbar-container">
+            <div class="navbar-left">
+                <a class="navbar-brand" href="/">⚽ ShowMeTheBet</a>
+                <div class="navbar-menu">
+                    <NavLink class="nav-menu-item" href="/ranking" Match="NavLinkMatch.Prefix">
+                        <span class="bi bi-trophy-fill"></span> 부자랭킹
+                    </NavLink>
+                    @if (AuthService.IsAuthenticated)
+                    {
+                        <NavLink class="nav-menu-item" href="/sports" Match="NavLinkMatch.Prefix">
+                            <span class="bi bi-trophy"></span> 스포츠
+                        </NavLink>
+                        <NavLink class="nav-menu-item" href="/oddeven" Match="NavLinkMatch.Prefix">
+                            <span class="bi bi-dice-6"></span> 홀짝
+                        </NavLink>
+                        <NavLink class="nav-menu-item" href="/graph" Match="NavLinkMatch.Prefix">
+                            <span class="bi bi-graph-up"></span> 그래프
+                        </NavLink>
+                    }
+                </div>
+            </div>
+            <div class="navbar-right">
+                @if (AuthService.IsAuthenticated)
+                {
+                    <div class="user-info">
+                        <span class="username">@AuthService.CurrentUser?.Username</span>
+                        <span class="balance">잔액: @(GetBalance().ToString("N0")) 원</span>
+                    </div>
+                    <button class="btn-logout" @onclick="HandleLogout">
+                        <span class="bi bi-box-arrow-right"></span> 로그아웃
+                    </button>
+                }
+                else
+                {
+                    <NavLink class="btn-login" href="/login">
+                        <span class="bi bi-box-arrow-in-right"></span> 로그인
+                    </NavLink>
+                }
+            </div>
+        </div>
     </div>
 
     <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
-
-        <article class="content px-4">
+        <article class="content">
             @Body
         </article>
     </main>
@@ -21,3 +59,25 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private decimal GetBalance()
+    {
+        return AuthService.CurrentUser?.Balance ?? 0;
+    }
+
+    private void HandleLogout()
+    {
+        AuthService.Logout();
+        StateHasChanged();
+        Navigation.NavigateTo("/login");
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            AuthService.OnAuthStateChanged += () => InvokeAsync(StateHasChanged);
+        }
+    }
+}

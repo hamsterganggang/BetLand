@@ -35,14 +35,36 @@ else
                 <div class="graph-section">
                     <h3>현재 배수</h3>
                     <div class="graph-container">
-                        <div class="graph-bar" style="height: @(currentMultiplier * 20)%">
-                            <div class="graph-value">x@(currentMultiplier.ToString("F1"))</div>
+                        <svg class="graph-svg" viewBox="0 0 400 300" preserveAspectRatio="none">
+                            <defs>
+                                <linearGradient id="graphGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                                </linearGradient>
+                            </defs>
+                            <path class="graph-line" d="@GetGraphPath()" fill="none" stroke="url(#graphGradient)" stroke-width="4" />
+                            <circle class="graph-dot" cx="@(GetCurrentX())" cy="@(GetCurrentY())" r="8" fill="#667eea" />
+                        </svg>
+                        <div class="graph-bar-overlay" style="height: @(currentMultiplier * 20)%">
+                            <div class="graph-value">x@(currentMultiplier.ToString("F2"))</div>
                         </div>
                     </div>
                     <div class="multiplier-display">
                         <span class="multiplier-label">배수:</span>
-                        <span class="multiplier-value">x@(currentMultiplier.ToString("F1"))</span>
+                        <span class="multiplier-value">x@(currentMultiplier.ToString("F2"))</span>
                     </div>
+                    @if (isGameRunning)
+                    {
+                        <div class="game-status">
+                            <p class="status-text">게임 진행 중...</p>
+                        </div>
+                    }
+                    @if (gameFailed)
+                    {
+                        <div class="game-status failed">
+                            <p class="status-text">❌ 게임 실패!</p>
+                        </div>
+                    }
                 </div>
 
                 <div class="bet-section">
@@ -51,32 +73,38 @@ else
                         <label>베팅 금액:</label>
                         <input type="number" 
                                class="form-control" 
-                               @bind="betAmount" 
-                               @bind:event="oninput"
+                               value="@betAmount" 
+                               @oninput="OnBetAmountInput"
                                min="1000" 
                                step="1000"
                                placeholder="금액 입력"
-                               disabled="@isGameRunning" />
+                               disabled="@(isGameRunning || gameFailed)" />
                     </div>
                     <div class="game-controls">
-                        @if (!isGameRunning)
+                        @if (!isGameRunning && !gameFailed)
                         {
                             <button class="btn btn-success btn-start" @onclick="StartGame" disabled="@(betAmount <= 0 || isLoading)">
                                 게임 시작
                             </button>
                         }
-                        else
+                        else if (isGameRunning && !gameFailed)
                         {
                             <button class="btn btn-danger btn-stop" @onclick="StopGame" disabled="@isLoading">
                                 STOP!
                             </button>
                         }
+                        else if (gameFailed)
+                        {
+                            <button class="btn btn-primary" @onclick="ResetGame">
+                                다시 시작
+                            </button>
+                        }
                     </div>
-                    @if (betAmount > 0 && currentMultiplier > 1.0m)
+                    @if (betAmount > 0 && (currentMultiplier > 1.0m || isGameRunning))
                     {
                         <div class="bet-summary">
                             <p>베팅 금액: <strong>@betAmount.ToString("N0") 원</strong></p>
-                            <p>현재 배수: <strong>x@(currentMultiplier.ToString("F1"))</strong></p>
+                            <p>현재 배수: <strong>x@(currentMultiplier.ToString("F2"))</strong></p>
                             <p>예상 당첨금: <strong>@((betAmount * currentMultiplier).ToString("N0")) 원</strong></p>
                         </div>
                     }
@@ -96,13 +124,20 @@ else
                     <div class="bets-list">
                         @foreach (var bet in bets)
                         {
-                            <div class="bet-item won">
+                            <div class="bet-item @(bet.Status == GameBetStatus.Won ? "won" : "lost")">
                                 <div class="bet-info">
-                                    <span class="bet-multiplier">x@(bet.Multiplier.ToString("F1"))</span>
+                                    <span class="bet-multiplier">x@(bet.Multiplier.ToString("F2"))</span>
                                     <span class="bet-amount">@bet.Amount.ToString("N0") 원</span>
                                 </div>
                                 <div class="bet-result">
-                                    <span class="win-amount">+@((bet.WinAmount - bet.Amount).ToString("N0")) 원</span>
+                                    @if (bet.Status == GameBetStatus.Won)
+                                    {
+                                        <span class="win-amount">+@((bet.WinAmount - bet.Amount).ToString("N0")) 원</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="lose-amount">-@bet.Amount.ToString("N0") 원</span>
+                                    }
                                 </div>
                                 <div class="bet-time">@bet.BetTime.ToString("HH:mm:ss")</div>
                             </div>
@@ -119,13 +154,18 @@ else
     private decimal currentMultiplier = 1.0m;
     private decimal betAmount = 0;
     private bool isGameRunning = false;
+    private bool gameFailed = false;
     private bool isLoading = false;
     private List<GameBet>? bets;
     private System.Threading.Timer? timer;
+    private System.Threading.Timer? failureCheckTimer;
     private const decimal MinMultiplier = 1.0m;
     private const decimal MaxMultiplier = 5.0m;
-    private const decimal MultiplierStep = 0.1m;
-    private bool isIncreasing = true;
+    private const int GameDurationSeconds = 30; // 30초 동안 1.0 -> 5.0
+    private const double FailureChancePerSecond = 0.05; // 5% 확률
+    private DateTime gameStartTime;
+    private Random random = new Random();
+    private List<(double x, double y)> graphPoints = new List<(double, double)>();
 
     protected override async Task OnInitializedAsync()
     {
@@ -141,45 +181,110 @@ else
         bets = await GameService.GetGraphBetsAsync();
     }
 
-    private void StartGame()
+    private void OnBetAmountInput(ChangeEventArgs e)
+    {
+        if (decimal.TryParse(e.Value?.ToString(), out var amount))
+        {
+            betAmount = amount;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartGame()
     {
         if (betAmount <= 0) return;
 
-        isGameRunning = true;
-        currentMultiplier = MinMultiplier;
-        isIncreasing = true;
-
-        timer = new System.Threading.Timer(_ =>
+        isLoading = true;
+        try
         {
-            InvokeAsync(() =>
+            // 먼저 베팅 금액 차감
+            var success = await GameService.StartGraphGameAsync(betAmount);
+            if (!success)
             {
-                if (isGameRunning)
+                await LoadData();
+                return;
+            }
+
+            // 게임 시작
+            isGameRunning = true;
+            gameFailed = false;
+            currentMultiplier = MinMultiplier;
+            gameStartTime = DateTime.Now;
+            graphPoints.Clear();
+            await LoadData();
+
+            // 그래프 부드럽게 업데이트 (50ms마다)
+            timer = new System.Threading.Timer(async _ =>
+            {
+                await InvokeAsync(() =>
                 {
-                    if (isIncreasing)
+                    if (!isGameRunning || gameFailed) return;
+
+                    var elapsed = (DateTime.Now - gameStartTime).TotalSeconds;
+                    
+                    // 배수 계산: 30초 동안 1.0 -> 5.0 (곡선형 - easeOutCubic)
+                    var progress = Math.Min(elapsed / GameDurationSeconds, 1.0);
+                    var easedProgress = 1 - Math.Pow(1 - progress, 3); // easeOutCubic 곡선
+                    currentMultiplier = MinMultiplier + (MaxMultiplier - MinMultiplier) * (decimal)easedProgress;
+
+                    // 그래프 포인트 추가 (최대 100개 유지)
+                    if (graphPoints.Count < 100)
                     {
-                        currentMultiplier += MultiplierStep;
-                        if (currentMultiplier >= MaxMultiplier)
-                        {
-                            isIncreasing = false;
-                        }
+                        graphPoints.Add((elapsed * 400 / GameDurationSeconds, 300 - (double)currentMultiplier * 60));
                     }
                     else
                     {
-                        currentMultiplier -= MultiplierStep;
-                        if (currentMultiplier <= MinMultiplier)
-                        {
-                            isIncreasing = true;
-                        }
+                        graphPoints.RemoveAt(0);
+                        graphPoints.Add((elapsed * 400 / GameDurationSeconds, 300 - (double)currentMultiplier * 60));
                     }
+
+                    if (currentMultiplier >= MaxMultiplier)
+                    {
+                        currentMultiplier = MaxMultiplier;
+                    }
+
                     StateHasChanged();
-                }
-            });
-        }, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(50));
+                });
+            }, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(50));
+
+            // 실패 체크는 1초마다
+            failureCheckTimer = new System.Threading.Timer(async _ =>
+            {
+                await InvokeAsync(() =>
+                {
+                    if (!isGameRunning || gameFailed) return;
+
+                    // 1초마다 5% 확률로 실패
+                    if (random.NextDouble() < FailureChancePerSecond)
+                    {
+                        // 게임 실패
+                        gameFailed = true;
+                        isGameRunning = false;
+                        
+                        // 실패 처리
+                        _ = Task.Run(async () =>
+                        {
+                            await InvokeAsync(async () =>
+                            {
+                                await GameService.FailGraphGameAsync(betAmount);
+                                await LoadData();
+                                StateHasChanged();
+                            });
+                        });
+                    }
+                });
+            }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
     }
 
     private async Task StopGame()
     {
-        if (!isGameRunning || betAmount <= 0) return;
+        if (!isGameRunning || betAmount <= 0 || gameFailed) return;
 
         isGameRunning = false;
         isLoading = true;
@@ -189,10 +294,15 @@ else
             await timer.DisposeAsync();
             timer = null;
         }
+        if (failureCheckTimer != null)
+        {
+            await failureCheckTimer.DisposeAsync();
+            failureCheckTimer = null;
+        }
 
         try
         {
-            var success = await GameService.PlaceGraphBetAsync(betAmount, currentMultiplier);
+            var success = await GameService.StopGraphGameAsync(betAmount, currentMultiplier);
             if (success)
             {
                 betAmount = 0;
@@ -203,7 +313,50 @@ else
         finally
         {
             isLoading = false;
+            StateHasChanged();
         }
+    }
+
+    private void ResetGame()
+    {
+        gameFailed = false;
+        currentMultiplier = MinMultiplier;
+        betAmount = 0;
+        graphPoints.Clear();
+        StateHasChanged();
+    }
+
+    private string GetGraphPath()
+    {
+        if (graphPoints.Count < 2) return "";
+
+        var path = new System.Text.StringBuilder();
+        path.Append($"M {graphPoints[0].x} {graphPoints[0].y}");
+
+        for (int i = 1; i < graphPoints.Count; i++)
+        {
+            var prev = graphPoints[i - 1];
+            var curr = graphPoints[i];
+            var cp1x = prev.x + (curr.x - prev.x) / 3;
+            var cp1y = prev.y;
+            var cp2x = curr.x - (curr.x - prev.x) / 3;
+            var cp2y = curr.y;
+            path.Append($" C {cp1x} {cp1y}, {cp2x} {cp2y}, {curr.x} {curr.y}");
+        }
+
+        return path.ToString();
+    }
+
+    private double GetCurrentX()
+    {
+        if (graphPoints.Count == 0) return 0;
+        return graphPoints[graphPoints.Count - 1].x;
+    }
+
+    private double GetCurrentY()
+    {
+        if (graphPoints.Count == 0) return 300;
+        return graphPoints[graphPoints.Count - 1].y;
     }
 
     private void NavigateToLogin()
@@ -217,6 +370,9 @@ else
         {
             await timer.DisposeAsync();
         }
+        if (failureCheckTimer != null)
+        {
+            await failureCheckTimer.DisposeAsync();
+        }
     }
 }
-

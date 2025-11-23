@@ -131,14 +131,30 @@ public class GameService
     }
 
     // 그래프 게임
-    public async Task<bool> PlaceGraphBetAsync(decimal amount, decimal multiplier)
+    public async Task<bool> StartGraphGameAsync(decimal amount)
+    {
+        if (_authService.CurrentUser == null) return false;
+
+        await _authService.RefreshUserAsync();
+        var user = _authService.CurrentUser;
+        if (user == null || user.Balance < amount) return false;
+
+        // 베팅 금액 차감
+        user.Balance -= amount;
+        await _context.SaveChangesAsync();
+
+        await _authService.RefreshUserAsync();
+        return true;
+    }
+
+    public async Task<bool> StopGraphGameAsync(decimal amount, decimal multiplier)
     {
         if (_authService.CurrentUser == null) return false;
         if (multiplier < 1.0m || multiplier > 5.0m) return false;
 
         await _authService.RefreshUserAsync();
         var user = _authService.CurrentUser;
-        if (user == null || user.Balance < amount) return false;
+        if (user == null) return false;
 
         var winAmount = amount * multiplier;
 
@@ -146,18 +162,46 @@ public class GameService
         {
             UserId = user.Id,
             GameType = GameType.Graph,
-            BetChoice = multiplier.ToString("F1"),
+            BetChoice = multiplier.ToString("F2"),
             Amount = amount,
             Multiplier = multiplier,
             WinAmount = winAmount,
             BetTime = DateTime.Now,
-            Status = GameBetStatus.Won, // 그래프 게임은 즉시 결과
-            Result = $"x{multiplier:F1}"
+            Status = GameBetStatus.Won,
+            Result = $"x{multiplier:F2}"
         };
 
-        user.Balance -= amount;
-        user.Balance += winAmount; // 즉시 승리 금액 추가
+        user.Balance += winAmount; // 승리 금액 추가
 
+        _context.GameBets.Add(bet);
+        await _context.SaveChangesAsync();
+
+        await _authService.RefreshUserAsync();
+        return true;
+    }
+
+    public async Task<bool> FailGraphGameAsync(decimal amount)
+    {
+        if (_authService.CurrentUser == null) return false;
+
+        await _authService.RefreshUserAsync();
+        var user = _authService.CurrentUser;
+        if (user == null) return false;
+
+        var bet = new GameBet
+        {
+            UserId = user.Id,
+            GameType = GameType.Graph,
+            BetChoice = "실패",
+            Amount = amount,
+            Multiplier = 0m,
+            WinAmount = 0m,
+            BetTime = DateTime.Now,
+            Status = GameBetStatus.Lost,
+            Result = "실패"
+        };
+
+        // 베팅 금액은 이미 차감되었으므로 추가 차감 없음
         _context.GameBets.Add(bet);
         await _context.SaveChangesAsync();
 

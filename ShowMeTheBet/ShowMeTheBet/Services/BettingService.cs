@@ -185,5 +185,12 @@ public class BettingService
         _context.Matches.AddRange(matches);
         await _context.SaveChangesAsync();
     }
+
+    public async Task<List<User>> GetUserRankingsAsync()
+    {
+        return await _context.Users
+            .OrderByDescending(u => u.Balance)
+            .ToListAsync();
+    }
 }
 

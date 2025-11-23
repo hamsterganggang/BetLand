@@ -47,8 +47,8 @@ else
                         <label>베팅 금액:</label>
                         <input type="number" 
                                class="form-control" 
-                               @bind="betAmount" 
-                               @bind:event="oninput"
+                               value="@betAmount" 
+                               @oninput="OnBetAmountInput"
                                min="1000" 
                                step="1000"
                                placeholder="금액 입력" />
@@ -75,7 +75,7 @@ else
                     }
                     <button class="btn btn-primary btn-bet" 
                             @onclick="PlaceBet"
-                            disabled="@(IsBetDisabled())">
+                            disabled="@IsBetDisabled()">
                         @if (isLoading)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
@@ -137,12 +137,14 @@ else
     private bool isLoading = false;
     private List<GameBet>? bets;
     private System.Threading.Timer? timer;
+    private DateTime lastRoundTime = DateTime.MinValue;
 
     protected override async Task OnInitializedAsync()
     {
         if (AuthService.IsAuthenticated)
         {
             await LoadData();
+            InitializeTimer();
             StartTimer();
         }
     }
@@ -153,6 +155,19 @@ else
         timeLeft = await GameService.GetTimeUntilNextRoundAsync();
         currentResult = await GameService.GetCurrentOddEvenResultAsync();
         bets = await GameService.GetOddEvenBetsAsync();
+        lastRoundTime = DateTime.Now;
+    }
+
+    private void InitializeTimer()
+    {
+        // 초기 시간 계산
+        var now = DateTime.Now;
+        var secondsSinceEpoch = (long)(now - new DateTime(1970, 1, 1)).TotalSeconds;
+        var currentRound = secondsSinceEpoch / 30;
+        var nextRoundTime = (currentRound + 1) * 30;
+        var nextRoundDateTime = new DateTime(1970, 1, 1).AddSeconds(nextRoundTime);
+        timeLeft = (int)(nextRoundDateTime - now).TotalSeconds;
+        if (timeLeft <= 0) timeLeft = 30;
     }
 
     private void StartTimer()
@@ -161,36 +176,65 @@ else
         {
             await InvokeAsync(async () =>
             {
-                timeLeft = await GameService.GetTimeUntilNextRoundAsync();
-                if (timeLeft == 30)
+                // 클라이언트 측에서 직접 계산
+                var now = DateTime.Now;
+                var secondsSinceEpoch = (long)(now - new DateTime(1970, 1, 1)).TotalSeconds;
+                var currentRound = secondsSinceEpoch / 30;
+                var nextRoundTime = (currentRound + 1) * 30;
+                var nextRoundDateTime = new DateTime(1970, 1, 1).AddSeconds(nextRoundTime);
+                var newTimeLeft = (int)(nextRoundDateTime - now).TotalSeconds;
+                
+                if (newTimeLeft <= 0)
                 {
+                    newTimeLeft = 30;
+                }
+
+                var previousTimeLeft = timeLeft;
+                timeLeft = newTimeLeft;
+
+                // 라운드가 바뀌었는지 확인 (30에서 29로 넘어갈 때)
+                if (previousTimeLeft == 30 && newTimeLeft < 30)
+                {
+                    // 새 라운드 시작 - 서버에서 데이터 새로고침
                     currentResult = await GameService.GetCurrentOddEvenResultAsync();
                     bets = await GameService.GetOddEvenBetsAsync();
                     balance = await GameService.GetBalanceAsync();
                 }
+
                 StateHasChanged();
             });
         }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
     }
 
+    private void OnBetAmountInput(ChangeEventArgs e)
+    {
+        if (decimal.TryParse(e.Value?.ToString(), out var amount))
+        {
+            betAmount = amount;
+            StateHasChanged();
+        }
+    }
+
     private void SelectOdd()
     {
         selectedChoice = "홀";
+        StateHasChanged();
     }
 
     private void SelectEven()
     {
         selectedChoice = "짝";
+        StateHasChanged();
     }
 
     private bool IsBetDisabled()
     {
-        return selectedChoice == "" || betAmount <= 0 || timeLeft < 5 || isLoading;
+        return string.IsNullOrEmpty(selectedChoice) || betAmount <= 0 || timeLeft < 5 || isLoading;
     }
 
     private async Task PlaceBet()
     {
-        if (selectedChoice == "" || betAmount <= 0) return;
+        if (string.IsNullOrEmpty(selectedChoice) || betAmount <= 0) return;
 
         isLoading = true;
         try
@@ -206,6 +250,7 @@ else
         finally
         {
             isLoading = false;
+            StateHasChanged();
         }
     }
 

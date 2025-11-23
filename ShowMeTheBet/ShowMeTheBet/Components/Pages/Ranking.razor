@@ -1,0 +1,86 @@
+@page "/ranking"
+@using ShowMeTheBet.Models
+@using ShowMeTheBet.Services
+@inject BettingService BettingService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>부자랭킹 - ShowMeTheBet</PageTitle>
+
+<div class="ranking-container">
+    <div class="ranking-header">
+        <h1>🏆 부자랭킹</h1>
+        <p>회원 보유 금액 순위</p>
+    </div>
+
+    <div class="ranking-content">
+        @if (rankings == null)
+        {
+            <div class="loading">
+                <p>로딩 중...</p>
+            </div>
+        }
+        else if (rankings.Count == 0)
+        {
+            <div class="empty-ranking">
+                <p>랭킹 데이터가 없습니다.</p>
+            </div>
+        }
+        else
+        {
+            <div class="ranking-list">
+                @for (int i = 0; i < rankings.Count; i++)
+                {
+                    var user = rankings[i];
+                    var rank = i + 1;
+                    var isCurrentUser = AuthService.IsAuthenticated && AuthService.CurrentUser?.Id == user.Id;
+                    
+                    <div class="ranking-item @(isCurrentUser ? "current-user" : "")">
+                        <div class="rank-number">
+                            @if (rank == 1)
+                            {
+                                <span class="rank-icon gold">🥇</span>
+                            }
+                            else if (rank == 2)
+                            {
+                                <span class="rank-icon silver">🥈</span>
+                            }
+                            else if (rank == 3)
+                            {
+                                <span class="rank-icon bronze">🥉</span>
+                            }
+                            else
+                            {
+                                <span class="rank-number-text">@rank</span>
+                            }
+                        </div>
+                        <div class="user-info">
+                            <div class="username">@user.Username</div>
+                            <div class="user-email">@user.Email</div>
+                        </div>
+                        <div class="balance-info">
+                            <div class="balance-amount">@user.Balance.ToString("N0") 원</div>
+                            <div class="balance-label">보유 금액</div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<User>? rankings;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadRankings();
+    }
+
+    private async Task LoadRankings()
+    {
+        rankings = await BettingService.GetUserRankingsAsync();
+    }
+}
+
