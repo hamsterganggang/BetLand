@@ -4,6 +4,7 @@ using ShowMeTheBet.Models;
 using BCrypt.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 
 namespace ShowMeTheBet.Services;
 
@@ -12,24 +13,72 @@ public class AuthService
     private readonly BettingDbContext _context;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<AuthService>? _logger;
+    private readonly IWebHostEnvironment? _environment;
     private User? _currentUser;
     private bool _userLoaded = false;
 
-    public AuthService(BettingDbContext context, IHttpContextAccessor httpContextAccessor, ILogger<AuthService>? logger = null)
+    public AuthService(BettingDbContext context, IHttpContextAccessor httpContextAccessor, ILogger<AuthService>? logger = null, IWebHostEnvironment? environment = null)
     {
         _context = context;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
+        _environment = environment;
     }
 
     public User? CurrentUser
     {
         get
         {
-            if (!_userLoaded)
+            // 항상 쿠키에서 확인 (IIS 환경에서 가장 안정적)
+            var httpContext = _httpContextAccessor.HttpContext;
+            if (httpContext != null && httpContext.Request.Cookies.TryGetValue("UserId", out var userIdCookie))
             {
-                LoadUserFromSession();
+                if (int.TryParse(userIdCookie, out var userId) && userId > 0)
+                {
+                    // _currentUser가 없거나 다른 사용자인 경우에만 로드
+                    if (_currentUser == null || _currentUser.Id != userId)
+                    {
+                        try
+                        {
+                            _currentUser = _context.Users.Find(userId);
+                            if (_currentUser != null)
+                            {
+                                _userLoaded = true;
+                                _logger?.LogInformation("CurrentUser getter에서 쿠키로 사용자 로드: {UserId}, {Username}", userId, _currentUser.Username);
+                            }
+                            else
+                            {
+                                _logger?.LogWarning("CurrentUser getter: 사용자를 찾을 수 없습니다: UserId {UserId}", userId);
+                                _currentUser = null;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogError(ex, "CurrentUser getter에서 사용자 로드 실패: {UserId}", userId);
+                            _currentUser = null;
+                        }
+                    }
+                }
+                else
+                {
+                    // 쿠키에 유효하지 않은 값이 있으면 null로 설정
+                    if (_currentUser != null)
+                    {
+                        _currentUser = null;
+                        _userLoaded = false;
+                    }
+                }
             }
+            else
+            {
+                // 쿠키가 없으면 null로 설정
+                if (_currentUser != null)
+                {
+                    _currentUser = null;
+                    _userLoaded = false;
+                }
+            }
+            
             return _currentUser;
         }
     }
@@ -38,11 +87,11 @@ public class AuthService
     {
         get
         {
-            if (!_userLoaded)
-            {
-                LoadUserFromSession();
-            }
-            return _currentUser != null;
+            // CurrentUser 속성을 통해 확인 (위의 로직 사용)
+            var user = CurrentUser;
+            var isAuth = user != null;
+            _logger?.LogInformation("IsAuthenticated 호출: {IsAuth}, UserId: {UserId}", isAuth, user?.Id ?? 0);
+            return isAuth;
         }
     }
 
@@ -71,7 +120,7 @@ public class AuthService
 
     private void LoadUserFromSession()
     {
-        if (_userLoaded) return;
+        if (_userLoaded && _currentUser != null) return;
 
         var httpContext = _httpContextAccessor.HttpContext;
         if (httpContext == null)
@@ -84,20 +133,25 @@ public class AuthService
 
         try
         {
-            // 1. 먼저 세션에서 로드 시도
-            if (httpContext.Session != null && httpContext.Session.IsAvailable)
+            // 1. 먼저 쿠키에서 시도 (IIS 환경에서 더 안정적)
+            if (httpContext.Request.Cookies.TryGetValue("UserId", out var userIdCookie))
             {
-                userId = httpContext.Session.GetInt32("UserId");
+                if (int.TryParse(userIdCookie, out var parsedUserId) && parsedUserId > 0)
+                {
+                    userId = parsedUserId;
+                    _logger?.LogInformation("LoadUserFromSession: 쿠키에서 UserId 로드: {UserId}", userId);
+                }
             }
             
-            // 2. 세션에서 찾지 못한 경우 쿠키에서 시도
+            // 2. 쿠키에서 찾지 못한 경우 세션에서 시도
             if (!userId.HasValue || userId.Value <= 0)
             {
-                if (httpContext.Request.Cookies.TryGetValue("UserId", out var userIdCookie))
+                if (httpContext.Session != null && httpContext.Session.IsAvailable)
                 {
-                    if (int.TryParse(userIdCookie, out var parsedUserId))
+                    userId = httpContext.Session.GetInt32("UserId");
+                    if (userId.HasValue)
                     {
-                        userId = parsedUserId;
+                        _logger?.LogInformation("LoadUserFromSession: 세션에서 UserId 로드: {UserId}", userId);
                     }
                 }
             }
@@ -106,11 +160,23 @@ public class AuthService
             if (userId.HasValue && userId.Value > 0)
             {
                 _currentUser = _context.Users.Find(userId.Value);
+                if (_currentUser != null)
+                {
+                    _logger?.LogInformation("LoadUserFromSession: 사용자 로드 완료: {UserId}, {Username}", userId, _currentUser.Username);
+                }
+                else
+                {
+                    _logger?.LogWarning("LoadUserFromSession: 사용자를 찾을 수 없습니다: UserId {UserId}", userId);
+                }
+            }
+            else
+            {
+                _logger?.LogWarning("LoadUserFromSession: 유효한 UserId를 찾을 수 없습니다");
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Session or cookie might not be available, ignore
+            _logger?.LogError(ex, "LoadUserFromSession 중 오류 발생");
         }
 
         _userLoaded = true;
@@ -134,48 +200,51 @@ public class AuthService
 
         try
         {
-            // 1. 먼저 세션에서 로드 시도
-            if (httpContext.Session != null)
+            // 1. 먼저 쿠키에서 시도 (IIS 환경에서 더 안정적)
+            if (httpContext.Request.Cookies.TryGetValue("UserId", out var userIdCookie))
             {
-                await httpContext.Session.LoadAsync();
-
-                int retryCount = 0;
-                while (!httpContext.Session.IsAvailable && retryCount < 5)
+                if (int.TryParse(userIdCookie, out var parsedUserId) && parsedUserId > 0)
                 {
-                    await Task.Delay(50);
-                    await httpContext.Session.LoadAsync();
-                    retryCount++;
+                    userId = parsedUserId;
+                    _logger?.LogInformation("쿠키에서 UserId 로드: {UserId}", userId);
                 }
-
-                if (httpContext.Session.IsAvailable)
-                {
-                    userId = httpContext.Session.GetInt32("UserId");
-                    _logger?.LogInformation("세션에서 UserId 로드: {UserId}", userId);
-                }
-                else
-                {
-                    _logger?.LogWarning("세션이 사용 불가능합니다");
-                }
-            }
-            else
-            {
-                _logger?.LogWarning("세션이 null입니다");
             }
             
-            // 2. 세션에서 찾지 못한 경우 쿠키에서 시도
+            // 2. 쿠키에서 찾지 못한 경우 세션에서 시도
             if (!userId.HasValue || userId.Value <= 0)
             {
-                if (httpContext.Request.Cookies.TryGetValue("UserId", out var userIdCookie))
+                if (httpContext.Session != null)
                 {
-                    if (int.TryParse(userIdCookie, out var parsedUserId))
+                    try
                     {
-                        userId = parsedUserId;
-                        _logger?.LogInformation("쿠키에서 UserId 로드: {UserId}", userId);
+                        await httpContext.Session.LoadAsync();
+
+                        int retryCount = 0;
+                        while (!httpContext.Session.IsAvailable && retryCount < 3)
+                        {
+                            await Task.Delay(50);
+                            await httpContext.Session.LoadAsync();
+                            retryCount++;
+                        }
+
+                        if (httpContext.Session.IsAvailable)
+                        {
+                            userId = httpContext.Session.GetInt32("UserId");
+                            _logger?.LogInformation("세션에서 UserId 로드: {UserId}", userId);
+                        }
+                        else
+                        {
+                            _logger?.LogWarning("세션이 사용 불가능합니다");
+                        }
+                    }
+                    catch (Exception sessionEx)
+                    {
+                        _logger?.LogWarning(sessionEx, "세션 로드 중 오류 발생, 쿠키 사용");
                     }
                 }
                 else
                 {
-                    _logger?.LogWarning("쿠키에서 UserId를 찾을 수 없습니다");
+                    _logger?.LogWarning("세션이 null입니다");
                 }
             }
             
@@ -183,8 +252,16 @@ public class AuthService
             if (userId.HasValue && userId.Value > 0)
             {
                 _currentUser = await _context.Users.FindAsync(userId.Value);
-                _logger?.LogInformation("사용자 로드 완료: {UserId}, Username: {Username}", 
-                    userId, _currentUser?.Username ?? "null");
+                if (_currentUser != null)
+                {
+                    _logger?.LogInformation("사용자 로드 완료: {UserId}, Username: {Username}", 
+                        userId, _currentUser.Username);
+                }
+                else
+                {
+                    _logger?.LogWarning("사용자를 찾을 수 없습니다: UserId {UserId}", userId);
+                    _currentUser = null;
+                }
             }
             else
             {
@@ -266,18 +343,29 @@ public class AuthService
                 else
                 {
                     _logger?.LogInformation("쿠키 저장 시작");
+                    
+                    // HTTP 환경에서도 작동하도록 Secure를 false로 설정
+                    // HTTPS를 사용하는 경우에만 true로 설정
+                    var isHttps = httpContext.Request.IsHttps || 
+                                 httpContext.Request.Headers["X-Forwarded-Proto"].ToString().Equals("https", StringComparison.OrdinalIgnoreCase);
+                    var isSecure = isHttps; // HTTPS인 경우에만 Secure 쿠키
+                    
+                    _logger?.LogInformation("쿠키 설정: IsHttps={IsHttps}, X-Forwarded-Proto={XForwardedProto}, Secure={Secure}", 
+                        httpContext.Request.IsHttps, 
+                        httpContext.Request.Headers["X-Forwarded-Proto"].ToString(), isSecure);
+                    
                     var cookieOptions = new CookieOptions
                     {
                         HttpOnly = true,
-                        Secure = false, // 로컬 개발 환경에서는 false
-                        SameSite = SameSiteMode.Lax,
+                        Secure = isSecure, // HTTPS인 경우에만 true
+                        SameSite = SameSiteMode.Lax, // 크로스 사이트 요청 허용
                         Path = "/",
                         MaxAge = TimeSpan.FromMinutes(30),
                         IsEssential = true
                     };
                     
                     httpContext.Response.Cookies.Append("UserId", user.Id.ToString(), cookieOptions);
-                    _logger?.LogInformation("쿠키에 UserId {UserId} 저장 완료", user.Id);
+                    _logger?.LogInformation("쿠키에 UserId {UserId} 저장 완료 (Secure: {IsSecure})", user.Id, isSecure);
                 }
             }
             else
@@ -309,17 +397,38 @@ public class AuthService
                 if (httpContext.Session != null)
                 {
                     httpContext.Session.Clear();
+                    _logger?.LogInformation("세션 클리어 완료");
                 }
                 
                 // 쿠키 삭제
                 if (httpContext.Response != null && !httpContext.Response.HasStarted)
                 {
-                    httpContext.Response.Cookies.Delete("UserId");
+                    // 쿠키 삭제 (만료 날짜를 과거로 설정)
+                    var cookieOptions = new CookieOptions
+                    {
+                        Expires = DateTimeOffset.UtcNow.AddDays(-1),
+                        HttpOnly = true,
+                        Path = "/",
+                        SameSite = SameSiteMode.Lax
+                    };
+                    
+                    // 환경에 따라 Secure 설정
+                    var isDevelopment = _environment?.IsDevelopment() ?? false;
+                    var isHttps = httpContext.Request.IsHttps || 
+                                 httpContext.Request.Headers["X-Forwarded-Proto"].ToString().Equals("https", StringComparison.OrdinalIgnoreCase);
+                    cookieOptions.Secure = !isDevelopment && isHttps;
+                    
+                    httpContext.Response.Cookies.Append("UserId", "", cookieOptions);
+                    _logger?.LogInformation("쿠키 삭제 완료");
+                }
+                else
+                {
+                    _logger?.LogWarning("Response가 null이거나 이미 시작되었습니다 - 쿠키 삭제 불가");
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Session or cookie might not be available, ignore
+                _logger?.LogError(ex, "로그아웃 중 세션/쿠키 삭제 오류");
             }
         }
 

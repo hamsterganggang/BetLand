@@ -58,13 +58,14 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // 세션에서 사용자 정보 로드
-        AuthService.ResetUserLoad();
-        await AuthService.LoadUserFromSessionAsync();
+        // CurrentUser를 확인 (쿠키에서 자동으로 로드됨)
+        // 세션 로드는 필요 없음 (CurrentUser getter에서 쿠키 확인)
+        var user = AuthService.CurrentUser;
         
-        if (AuthService.IsAuthenticated)
+        if (user != null)
         {
-            Navigation.NavigateTo("/game");
+            // 이미 로그인되어 있으면 게임 페이지로 이동
+            Navigation.NavigateTo("/game", forceLoad: true);
         }
     }
 
@@ -100,9 +101,16 @@
                         }});
                         
                         const data = await response.json();
+                        console.log('로그인 응답:', data);
                         if (data.success) {{
+                            console.log('로그인 성공, 세션/쿠키 저장 대기 중...');
+                            // 세션/쿠키 저장을 위해 약간의 지연 후 페이지 이동
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            console.log('페이지 이동 시작: /game');
+                            // 페이지를 완전히 리로드하여 세션/쿠키를 포함한 새 요청 보내기
                             window.location.href = '/game';
                         }} else {{
+                            console.log('로그인 실패:', data.message);
                             // 에러는 서버에서 처리하므로 페이지 리로드
                             window.location.reload();
                         }}

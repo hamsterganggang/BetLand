@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using ShowMeTheBet.Components;
 using ShowMeTheBet.Data;
 using ShowMeTheBet.Services;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,14 +26,25 @@ builder.Services.AddSession(options =>
     options.Cookie.HttpOnly = true;
     options.Cookie.IsEssential = true;
     options.Cookie.SameSite = SameSiteMode.Lax;
-    // 로컬 개발 환경에서는 SecurePolicy를 None으로 설정
-    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() 
-        ? CookieSecurePolicy.None 
-        : CookieSecurePolicy.SameAsRequest;
+    // HTTP 환경에서도 작동하도록 SecurePolicy를 None으로 설정
+    // HTTPS를 사용하는 경우 SameAsRequest로 변경 가능
+    options.Cookie.SecurePolicy = CookieSecurePolicy.None; // HTTP 환경 지원
     options.Cookie.Path = "/";
     options.Cookie.Name = ".ShowMeTheBet.Session";
     // 쿠키가 항상 설정되도록
     options.Cookie.MaxAge = TimeSpan.FromMinutes(30);
+    // 프로덕션 환경에서는 Domain 설정 가능 (필요한 경우)
+    // options.Cookie.Domain = "yourdomain.com";
+});
+
+// ForwardedHeaders 서비스 추가 (IIS 리버스 프록시용)
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | 
+                               ForwardedHeaders.XForwardedProto |
+                               ForwardedHeaders.XForwardedHost;
+    // 신뢰할 수 있는 프록시 설정 (필요한 경우)
+    // options.KnownProxies.Add(IPAddress.Parse("127.0.0.1"));
 });
 
 // Services
@@ -94,6 +106,18 @@ using (var scope = app.Services.CreateScope())
 }
 
 // Configure the HTTP request pipeline.
+// IIS 리버스 프록시를 위한 ForwardedHeaders 설정 (가장 먼저 실행되어야 함)
+// 프로덕션 환경에서만 사용 (개발 환경에서는 필요 없음)
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | 
+                      ForwardedHeaders.XForwardedProto |
+                      ForwardedHeaders.XForwardedHost
+};
+// 신뢰할 수 있는 프록시 설정 (필요한 경우)
+// forwardedHeadersOptions.KnownProxies.Add(IPAddress.Parse("127.0.0.1"));
+app.UseForwardedHeaders(forwardedHeadersOptions);
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
@@ -101,7 +125,12 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-app.UseHttpsRedirection();
+
+// 개발 환경이 아닐 때만 HTTPS 리다이렉션 (IIS에서 처리할 수도 있음)
+if (app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseSession();
 app.UseAntiforgery();

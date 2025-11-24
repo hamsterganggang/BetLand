@@ -1,14 +1,24 @@
 @page "/game"
 @using ShowMeTheBet.Models
 @using ShowMeTheBet.Services
+@using Microsoft.AspNetCore.Http
+@using Microsoft.JSInterop
 @inject BettingService BettingService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
+@inject IHttpContextAccessor HttpContextAccessor
+@inject IJSRuntime JSRuntime
 @rendermode InteractiveServer
 
 <PageTitle>ShowMeTheBet</PageTitle>
 
-@if (!AuthService.IsAuthenticated)
+@if (isLoading)
+{
+    <div style="text-align: center; padding: 50px;">
+        <p>로딩 중...</p>
+    </div>
+}
+else if (!isAuthenticated)
 {
     <div class="auth-required">
         <div class="auth-message">
@@ -59,36 +69,92 @@ else
 
 @code {
     private decimal balance = 0;
+    private bool isAuthenticated = false;
+    private bool isLoading = true;
 
     protected override async Task OnInitializedAsync()
     {
-        // 세션에서 사용자 정보 로드 (재시도 로직 포함)
-        AuthService.ResetUserLoad();
+        isLoading = true;
+        StateHasChanged();
         
-        // 세션 로드를 여러 번 시도 (최대 10번, 더 긴 대기 시간)
-        bool isAuthenticated = false;
-        for (int i = 0; i < 10; i++)
+        // API를 통해 인증 상태 확인 (쿠키가 자동으로 포함됨)
+        try
         {
-            AuthService.ResetUserLoad(); // 매번 리셋하여 강제로 다시 로드
-            await AuthService.LoadUserFromSessionAsync();
-            isAuthenticated = AuthService.IsAuthenticated;
-            if (isAuthenticated)
+            var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+            if (authResult != null && authResult.authenticated)
             {
-                break;
+                isAuthenticated = true;
+                // AuthService에 사용자 정보 로드
+                AuthService.ResetUserLoad();
+                await AuthService.LoadUserFromSessionAsync();
+                balance = await BettingService.GetBalanceAsync();
             }
-            // 각 시도 사이에 대기 (점진적으로 증가)
-            await Task.Delay(50 * (i + 1));
+            else
+            {
+                isAuthenticated = false;
+            }
+        }
+        catch
+        {
+            // API 호출 실패 시 직접 확인
+            var httpContext = HttpContextAccessor.HttpContext;
+            if (httpContext != null && httpContext.Request.Cookies.TryGetValue("UserId", out var userIdCookie))
+            {
+                if (int.TryParse(userIdCookie, out var userId) && userId > 0)
+                {
+                    AuthService.ResetUserLoad();
+                    await AuthService.LoadUserFromSessionAsync();
+                    var user = AuthService.CurrentUser;
+                    isAuthenticated = user != null;
+                    
+                    if (isAuthenticated)
+                    {
+                        balance = await BettingService.GetBalanceAsync();
+                    }
+                }
+            }
         }
         
-        if (isAuthenticated)
+        isLoading = false;
+        StateHasChanged();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // 파라미터 변경 시 인증 상태 재확인
+        try
         {
-            balance = await BettingService.GetBalanceAsync();
+            var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+            if (authResult != null && authResult.authenticated)
+            {
+                isAuthenticated = true;
+                if (balance == 0)
+                {
+                    balance = await BettingService.GetBalanceAsync();
+                }
+            }
+            else
+            {
+                isAuthenticated = false;
+            }
         }
-        else
+        catch
         {
-            // 로그인되지 않은 경우 로그인 페이지로 리다이렉트
-            Navigation.NavigateTo("/login");
+            // API 호출 실패 시 직접 확인
+            var user = AuthService.CurrentUser;
+            isAuthenticated = user != null;
         }
+        
+        StateHasChanged();
+    }
+
+    private class AuthCheckResult
+    {
+        public bool success { get; set; }
+        public bool authenticated { get; set; }
+        public int? userId { get; set; }
+        public string? username { get; set; }
+        public decimal? balance { get; set; }
     }
 
     private void NavigateToLogin()

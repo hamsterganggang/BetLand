@@ -26,11 +26,43 @@ public class AuthController : ControllerBase
         
         if (success)
         {
+            // 세션/쿠키가 확실히 저장되도록 약간의 지연
+            await Task.Delay(100);
             return Ok(new { success = true, redirectUrl = "/game" });
         }
         else
         {
             return Unauthorized(new { success = false, message = "사용자명 또는 비밀번호가 올바르지 않습니다." });
+        }
+    }
+
+    [HttpPost("logout")]
+    public IActionResult Logout()
+    {
+        _authService.Logout();
+        return Ok(new { success = true });
+    }
+
+    [HttpGet("check")]
+    public IActionResult CheckAuth()
+    {
+        var user = _authService.CurrentUser;
+        if (user != null)
+        {
+            return Ok(new { 
+                success = true, 
+                authenticated = true,
+                userId = user.Id,
+                username = user.Username,
+                balance = user.Balance
+            });
+        }
+        else
+        {
+            return Ok(new { 
+                success = true, 
+                authenticated = false 
+            });
         }
     }
 
