@@ -1,14 +1,22 @@
 @page "/sports"
 @using ShowMeTheBet.Models
 @using ShowMeTheBet.Services
+@using Microsoft.JSInterop
 @inject BettingService BettingService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 @rendermode InteractiveServer
 
 <PageTitle>스포츠 토토 - ShowMeTheBet</PageTitle>
 
-@if (!AuthService.IsAuthenticated)
+@if (isLoading)
+{
+    <div style="text-align: center; padding: 50px;">
+        <p>로딩 중...</p>
+    </div>
+}
+else if (!isAuthenticated)
 {
     <div class="auth-required">
         <div class="auth-message">
@@ -82,18 +90,111 @@ else
     private List<BetSlip.BetSlipItem> selectedBets = new();
     private List<Match>? matches;
     private decimal balance = 0;
+    private bool isAuthenticated = false;
+    private bool isLoading = true;
 
     protected override async Task OnInitializedAsync()
     {
-        // 세션에서 사용자 정보 로드
-        AuthService.ResetUserLoad();
-        await AuthService.LoadUserFromSessionAsync();
+        isLoading = true;
+        StateHasChanged();
         
-        if (AuthService.IsAuthenticated || AuthService.CurrentUser != null)
+        // 실서버(IIS)에서 SignalR 연결의 HttpContext 접근 문제를 해결하기 위해
+        // JavaScript Interop을 통해 API를 호출하여 인증 상태 확인
+        try
         {
-            matches = await BettingService.GetMatchesAsync();
-            balance = await BettingService.GetBalanceAsync();
+            var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+            if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
+            {
+                // API 응답을 기반으로 사용자 정보 로드
+                await AuthService.LoadUserByIdAsync(authResult.userId.Value);
+                isAuthenticated = true;
+                // API 응답의 balance를 사용하거나, RefreshUserAsync 후 GetBalanceAsync 호출
+                if (authResult.balance.HasValue)
+                {
+                    balance = authResult.balance.Value;
+                }
+                else
+                {
+                    await AuthService.RefreshUserAsync();
+                    balance = await BettingService.GetBalanceAsync();
+                }
+                matches = await BettingService.GetMatchesAsync();
+            }
+            else
+            {
+                // API 호출 실패 시 직접 확인 (로컬 환경 대비)
+                AuthService.ResetUserLoad();
+                await AuthService.LoadUserFromSessionAsync();
+                var user = AuthService.CurrentUser;
+                isAuthenticated = user != null;
+                
+                if (isAuthenticated)
+                {
+                    await AuthService.RefreshUserAsync();
+                    balance = await BettingService.GetBalanceAsync();
+                    matches = await BettingService.GetMatchesAsync();
+                }
+            }
         }
+        catch
+        {
+            // API 호출 실패 시 직접 확인
+            AuthService.ResetUserLoad();
+            await AuthService.LoadUserFromSessionAsync();
+            var user = AuthService.CurrentUser;
+            isAuthenticated = user != null;
+            
+            if (isAuthenticated)
+            {
+                await AuthService.RefreshUserAsync();
+                balance = await BettingService.GetBalanceAsync();
+                matches = await BettingService.GetMatchesAsync();
+            }
+        }
+        
+        isLoading = false;
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !isAuthenticated)
+        {
+            // 첫 렌더링 후에도 인증 상태를 다시 확인 (SignalR 연결 후 HttpContext가 설정될 수 있음)
+            await CheckAuthAndLoadData();
+        }
+    }
+
+    private async Task CheckAuthAndLoadData()
+    {
+        try
+        {
+            var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+            if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
+            {
+                var wasAuthenticated = isAuthenticated;
+                await AuthService.LoadUserByIdAsync(authResult.userId.Value);
+                isAuthenticated = true;
+                
+                if (!wasAuthenticated)
+                {
+                    await AuthService.RefreshUserAsync();
+                    balance = await BettingService.GetBalanceAsync();
+                    matches = await BettingService.GetMatchesAsync();
+                    StateHasChanged();
+                }
+            }
+        }
+        catch { }
+    }
+
+    private class AuthCheckResult
+    {
+        public bool success { get; set; }
+        public bool authenticated { get; set; }
+        public int? userId { get; set; }
+        public string? username { get; set; }
+        public decimal? balance { get; set; }
     }
 
     private void SelectBet(int matchId, BetType type, decimal odds, string homeTeam, string awayTeam)
@@ -123,6 +224,12 @@ else
 
     private async Task PlaceBets()
     {
+        // 베팅 전에 사용자 정보 다시 로드
+        if (AuthService.CurrentUser == null)
+        {
+            await AuthService.LoadUserFromSessionAsync();
+        }
+        
         foreach (var bet in selectedBets.Where(b => b.Amount > 0))
         {
             await BettingService.PlaceBetAsync(bet.MatchId, bet.Type, bet.Amount);

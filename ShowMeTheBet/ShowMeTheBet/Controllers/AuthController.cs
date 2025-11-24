@@ -44,17 +44,24 @@ public class AuthController : ControllerBase
     }
 
     [HttpGet("check")]
-    public IActionResult CheckAuth()
+    public async Task<IActionResult> CheckAuth()
     {
+        // 세션/쿠키에서 사용자 정보를 다시 로드 시도
+        await _authService.LoadUserFromSessionAsync();
+        
         var user = _authService.CurrentUser;
         if (user != null)
         {
+            // 최신 잔액을 위해 DB에서 다시 로드
+            await _authService.RefreshUserAsync();
+            var refreshedUser = _authService.CurrentUser;
+            
             return Ok(new { 
                 success = true, 
                 authenticated = true,
-                userId = user.Id,
-                username = user.Username,
-                balance = user.Balance
+                userId = refreshedUser?.Id ?? user.Id,
+                username = refreshedUser?.Username ?? user.Username,
+                balance = refreshedUser?.Balance ?? user.Balance
             });
         }
         else

@@ -37,14 +37,25 @@ builder.Services.AddSession(options =>
     // options.Cookie.Domain = "yourdomain.com";
 });
 
+// SignalR을 위한 추가 설정 (IIS 환경에서 안정적인 연결을 위해)
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = !builder.Environment.IsProduction();
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+    options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+});
+
 // ForwardedHeaders 서비스 추가 (IIS 리버스 프록시용)
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | 
                                ForwardedHeaders.XForwardedProto |
                                ForwardedHeaders.XForwardedHost;
-    // 신뢰할 수 있는 프록시 설정 (필요한 경우)
-    // options.KnownProxies.Add(IPAddress.Parse("127.0.0.1"));
+    // 모든 프록시를 신뢰 (IIS 환경에서 필요)
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+    // IIS에서 모든 프록시를 신뢰하도록 설정
+    options.RequireHeaderSymmetry = false;
 });
 
 // Services
@@ -107,16 +118,7 @@ using (var scope = app.Services.CreateScope())
 
 // Configure the HTTP request pipeline.
 // IIS 리버스 프록시를 위한 ForwardedHeaders 설정 (가장 먼저 실행되어야 함)
-// 프로덕션 환경에서만 사용 (개발 환경에서는 필요 없음)
-var forwardedHeadersOptions = new ForwardedHeadersOptions
-{
-    ForwardedHeaders = ForwardedHeaders.XForwardedFor | 
-                      ForwardedHeaders.XForwardedProto |
-                      ForwardedHeaders.XForwardedHost
-};
-// 신뢰할 수 있는 프록시 설정 (필요한 경우)
-// forwardedHeadersOptions.KnownProxies.Add(IPAddress.Parse("127.0.0.1"));
-app.UseForwardedHeaders(forwardedHeadersOptions);
+app.UseForwardedHeaders();
 
 if (!app.Environment.IsDevelopment())
 {
@@ -135,9 +137,15 @@ if (app.Environment.IsDevelopment())
 app.UseSession();
 app.UseAntiforgery();
 
+// 정적 파일 제공
+app.UseStaticFiles();
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+// SignalR 연결을 위한 엔드포인트 (Blazor Server가 자동으로 사용)
+// 명시적으로 추가하여 IIS에서 연결이 안정적으로 작동하도록 함
 
 // Map API controllers
 app.MapControllers();

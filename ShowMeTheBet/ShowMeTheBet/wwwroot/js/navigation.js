@@ -53,18 +53,28 @@ window.checkAuth = async function() {
     try {
         const response = await fetch('/api/auth/check', {
             method: 'GET',
-            credentials: 'include'
+            credentials: 'include',
+            cache: 'no-cache'
         });
         
         if (response.ok) {
             const data = await response.json();
+            console.log('인증 확인 결과:', data);
             return data;
         } else {
+            console.error('인증 확인 실패:', response.status);
             return { success: false, authenticated: false };
         }
     } catch (error) {
         console.error('인증 확인 오류:', error);
         return { success: false, authenticated: false };
     }
+};
+
+window.getCookie = function(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return null;
 };
 

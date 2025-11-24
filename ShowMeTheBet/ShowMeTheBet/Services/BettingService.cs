@@ -37,6 +37,12 @@ public class BettingService
 
     public async Task<bool> PlaceBetAsync(int matchId, BetType type, decimal amount)
     {
+        // CurrentUser가 null이면 다시 로드 시도
+        if (_authService.CurrentUser == null)
+        {
+            await _authService.LoadUserFromSessionAsync();
+        }
+        
         if (_authService.CurrentUser == null) return false;
         
         var match = await GetMatchAsync(matchId);

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ShowMeTheBet.Data;
 using ShowMeTheBet.Models;
+using Microsoft.AspNetCore.Http;
 
 namespace ShowMeTheBet.Services;
 
@@ -8,13 +9,50 @@ public class GameService
 {
     private readonly BettingDbContext _context;
     private readonly AuthService _authService;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private DateTime _lastOddEvenResult = DateTime.MinValue;
     private string _currentOddEvenResult = string.Empty;
 
-    public GameService(BettingDbContext context, AuthService authService)
+    public GameService(BettingDbContext context, AuthService authService, IHttpContextAccessor httpContextAccessor)
     {
         _context = context;
         _authService = authService;
+        _httpContextAccessor = httpContextAccessor;
+    }
+    
+    private int? GetUserIdFromCookie()
+    {
+        try
+        {
+            var httpContext = _httpContextAccessor.HttpContext;
+            if (httpContext == null)
+            {
+                System.Diagnostics.Debug.WriteLine("[GetUserIdFromCookie] HttpContext가 null");
+                return null;
+            }
+            
+            if (httpContext.Request.Cookies.TryGetValue("UserId", out var userIdCookie))
+            {
+                if (int.TryParse(userIdCookie, out var userId) && userId > 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[GetUserIdFromCookie] 쿠키에서 userId 찾음: {userId}");
+                    return userId;
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[GetUserIdFromCookie] 쿠키 값 파싱 실패: {userIdCookie}");
+                }
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("[GetUserIdFromCookie] UserId 쿠키를 찾을 수 없음");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[GetUserIdFromCookie] 예외 발생: {ex.Message}");
+        }
+        return null;
     }
 
     // 홀짝 게임
@@ -43,18 +81,39 @@ public class GameService
         return timeLeft > 0 ? timeLeft : 30;
     }
 
-    public async Task<bool> PlaceOddEvenBetAsync(string choice, decimal amount)
+    public async Task<bool> PlaceOddEvenBetAsync(string choice, decimal amount, int? userId = null)
     {
-        if (_authService.CurrentUser == null) return false;
         if (choice != "홀" && choice != "짝") return false;
 
-        await _authService.RefreshUserAsync();
-        var user = _authService.CurrentUser;
-        if (user == null || user.Balance < amount) return false;
+        // userId가 제공되지 않으면 CurrentUser 또는 쿠키에서 가져오기
+        if (!userId.HasValue)
+        {
+            // CurrentUser가 null이면 다시 로드 시도
+            if (_authService.CurrentUser == null)
+            {
+                await _authService.LoadUserFromSessionAsync();
+            }
+            
+            // CurrentUser가 여전히 null이면 쿠키에서 userId 가져오기
+            if (_authService.CurrentUser != null)
+            {
+                userId = _authService.CurrentUser.Id;
+            }
+            else
+            {
+                userId = GetUserIdFromCookie();
+            }
+        }
+        
+        if (!userId.HasValue) return false;
+
+        // DB에서 직접 사용자 조회
+        var trackedUser = await _context.Users.FindAsync(userId.Value);
+        if (trackedUser == null || trackedUser.Balance < amount) return false;
 
         var bet = new GameBet
         {
-            UserId = user.Id,
+            UserId = trackedUser.Id,
             GameType = GameType.OddEven,
             BetChoice = choice,
             Amount = amount,
@@ -64,9 +123,23 @@ public class GameService
             Status = GameBetStatus.Pending
         };
 
-        user.Balance -= amount;
+        // 잔액 차감
+        trackedUser.Balance -= amount;
         _context.GameBets.Add(bet);
-        await _context.SaveChangesAsync();
+        
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch
+        {
+            // 저장 실패 시 원래 상태로 복구
+            await _context.Entry(trackedUser).ReloadAsync();
+            return false;
+        }
+
+        // 변경 추적 초기화 후 다시 로드
+        _context.Entry(trackedUser).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
 
         // 결과 확인 (30초 라운드 기준)
         await CheckOddEvenResultsAsync();
@@ -118,42 +191,144 @@ public class GameService
         return random.Next(0, 2) == 0 ? "홀" : "짝";
     }
 
-    public async Task<List<GameBet>> GetOddEvenBetsAsync()
+    public async Task<List<GameBet>> GetOddEvenBetsAsync(int? userId = null)
     {
-        if (_authService.CurrentUser == null) return new List<GameBet>();
+        // userId가 제공되지 않으면 CurrentUser 또는 쿠키에서 가져오기
+        if (!userId.HasValue)
+        {
+            if (_authService.CurrentUser == null)
+            {
+                await _authService.LoadUserFromSessionAsync();
+            }
+            
+            if (_authService.CurrentUser != null)
+            {
+                userId = _authService.CurrentUser.Id;
+            }
+            else
+            {
+                userId = GetUserIdFromCookie();
+            }
+        }
+        
+        if (!userId.HasValue) return new List<GameBet>();
 
         await CheckOddEvenResultsAsync();
 
         return await _context.GameBets
-            .Where(b => b.UserId == _authService.CurrentUser.Id && b.GameType == GameType.OddEven)
+            .Where(b => b.UserId == userId.Value && b.GameType == GameType.OddEven)
             .OrderByDescending(b => b.BetTime)
             .ToListAsync();
     }
 
     // 그래프 게임
-    public async Task<bool> StartGraphGameAsync(decimal amount)
+    public async Task<bool> StartGraphGameAsync(decimal amount, int? userId = null)
     {
-        if (_authService.CurrentUser == null) return false;
+        try
+        {
+            // userId가 제공되지 않으면 CurrentUser 또는 쿠키에서 가져오기
+            if (!userId.HasValue)
+            {
+                // CurrentUser가 null이면 다시 로드 시도
+                if (_authService.CurrentUser == null)
+                {
+                    await _authService.LoadUserFromSessionAsync();
+                }
+                
+                // CurrentUser가 여전히 null이면 쿠키에서 userId 가져오기
+                if (_authService.CurrentUser != null)
+                {
+                    userId = _authService.CurrentUser.Id;
+                }
+                else
+                {
+                    userId = GetUserIdFromCookie();
+                }
+            }
+            
+            if (!userId.HasValue)
+            {
+                System.Diagnostics.Debug.WriteLine($"[StartGraphGameAsync] userId를 찾을 수 없음");
+                return false;
+            }
 
-        await _authService.RefreshUserAsync();
-        var user = _authService.CurrentUser;
-        if (user == null || user.Balance < amount) return false;
+            System.Diagnostics.Debug.WriteLine($"[StartGraphGameAsync] userId: {userId.Value}, amount: {amount}");
 
-        // 베팅 금액 차감
-        user.Balance -= amount;
-        await _context.SaveChangesAsync();
+            // DB에서 직접 사용자 조회
+            var trackedUser = await _context.Users.FindAsync(userId.Value);
+            if (trackedUser == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[StartGraphGameAsync] 사용자를 찾을 수 없음: userId {userId.Value}");
+                return false;
+            }
+            
+            if (trackedUser.Balance < amount)
+            {
+                System.Diagnostics.Debug.WriteLine($"[StartGraphGameAsync] 잔액 부족: {trackedUser.Balance} < {amount}");
+                return false;
+            }
+            
+            System.Diagnostics.Debug.WriteLine($"[StartGraphGameAsync] 사용자 확인 완료: {trackedUser.Username}, 잔액: {trackedUser.Balance}");
+        
+            // 잔액 차감
+            trackedUser.Balance -= amount;
+            
+            System.Diagnostics.Debug.WriteLine($"[StartGraphGameAsync] 잔액 차감 후: {trackedUser.Balance}");
+            
+            try
+            {
+                await _context.SaveChangesAsync();
+                System.Diagnostics.Debug.WriteLine($"[StartGraphGameAsync] DB 저장 성공");
+            }
+            catch (Exception ex)
+            {
+                // 저장 실패 시 원래 상태로 복구
+                System.Diagnostics.Debug.WriteLine($"[StartGraphGameAsync] DB 저장 실패: {ex.Message}");
+                await _context.Entry(trackedUser).ReloadAsync();
+                return false;
+            }
 
-        await _authService.RefreshUserAsync();
-        return true;
+            // 변경 추적 초기화 후 다시 로드
+            _context.Entry(trackedUser).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+            await _authService.RefreshUserAsync();
+            System.Diagnostics.Debug.WriteLine($"[StartGraphGameAsync] 성공");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[StartGraphGameAsync] 예외 발생: {ex.Message}, StackTrace: {ex.StackTrace}");
+            return false;
+        }
     }
 
-    public async Task<bool> StopGraphGameAsync(decimal amount, decimal multiplier)
+    public async Task<bool> StopGraphGameAsync(decimal amount, decimal multiplier, int? userId = null)
     {
-        if (_authService.CurrentUser == null) return false;
         if (multiplier < 1.0m || multiplier > 5.0m) return false;
 
-        await _authService.RefreshUserAsync();
-        var user = _authService.CurrentUser;
+        // userId가 제공되지 않으면 CurrentUser 또는 쿠키에서 가져오기
+        if (!userId.HasValue)
+        {
+            // CurrentUser가 null이면 다시 로드 시도
+            if (_authService.CurrentUser == null)
+            {
+                await _authService.LoadUserFromSessionAsync();
+            }
+            
+            // CurrentUser가 여전히 null이면 쿠키에서 userId 가져오기
+            if (_authService.CurrentUser != null)
+            {
+                userId = _authService.CurrentUser.Id;
+            }
+            else
+            {
+                userId = GetUserIdFromCookie();
+            }
+        }
+        
+        if (!userId.HasValue) return false;
+
+        // DB에서 직접 사용자 조회
+        var user = await _context.Users.FindAsync(userId.Value);
         if (user == null) return false;
 
         var winAmount = amount * multiplier;
@@ -174,7 +349,17 @@ public class GameService
         user.Balance += winAmount; // 승리 금액 추가
 
         _context.GameBets.Add(bet);
-        await _context.SaveChangesAsync();
+        
+        try
+        {
+            await _context.SaveChangesAsync();
+            System.Diagnostics.Debug.WriteLine($"[StopGraphGameAsync] 성공: userId={userId.Value}, winAmount={winAmount}, newBalance={user.Balance}");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[StopGraphGameAsync] DB 저장 실패: {ex.Message}");
+            return false;
+        }
 
         await _authService.RefreshUserAsync();
         return true;
@@ -182,10 +367,27 @@ public class GameService
 
     public async Task<bool> FailGraphGameAsync(decimal amount)
     {
-        if (_authService.CurrentUser == null) return false;
+        // CurrentUser가 null이면 다시 로드 시도
+        if (_authService.CurrentUser == null)
+        {
+            await _authService.LoadUserFromSessionAsync();
+        }
+        
+        // CurrentUser가 여전히 null이면 쿠키에서 userId 가져오기
+        int? userId = null;
+        if (_authService.CurrentUser != null)
+        {
+            userId = _authService.CurrentUser.Id;
+        }
+        else
+        {
+            userId = GetUserIdFromCookie();
+        }
+        
+        if (!userId.HasValue) return false;
 
-        await _authService.RefreshUserAsync();
-        var user = _authService.CurrentUser;
+        // DB에서 직접 사용자 조회
+        var user = await _context.Users.FindAsync(userId.Value);
         if (user == null) return false;
 
         var bet = new GameBet
@@ -209,12 +411,30 @@ public class GameService
         return true;
     }
 
-    public async Task<List<GameBet>> GetGraphBetsAsync()
+    public async Task<List<GameBet>> GetGraphBetsAsync(int? userId = null)
     {
-        if (_authService.CurrentUser == null) return new List<GameBet>();
+        // userId가 제공되지 않으면 CurrentUser 또는 쿠키에서 가져오기
+        if (!userId.HasValue)
+        {
+            if (_authService.CurrentUser == null)
+            {
+                await _authService.LoadUserFromSessionAsync();
+            }
+            
+            if (_authService.CurrentUser != null)
+            {
+                userId = _authService.CurrentUser.Id;
+            }
+            else
+            {
+                userId = GetUserIdFromCookie();
+            }
+        }
+        
+        if (!userId.HasValue) return new List<GameBet>();
 
         return await _context.GameBets
-            .Where(b => b.UserId == _authService.CurrentUser.Id && b.GameType == GameType.Graph)
+            .Where(b => b.UserId == userId.Value && b.GameType == GameType.Graph)
             .OrderByDescending(b => b.BetTime)
             .ToListAsync();
     }

@@ -451,6 +451,20 @@ h1:focus {
     margin-bottom: 10px;
 }
 
+.quick-amount-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.quick-amount-buttons .btn {
+    flex: 1;
+    min-width: 60px;
+    font-size: 0.875rem;
+    padding: 6px 12px;
+}
+
 .bet-amount-input {
     margin-top: 10px;
 }

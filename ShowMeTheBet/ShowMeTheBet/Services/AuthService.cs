@@ -345,14 +345,13 @@ public class AuthService
                     _logger?.LogInformation("쿠키 저장 시작");
                     
                     // HTTP 환경에서도 작동하도록 Secure를 false로 설정
-                    // HTTPS를 사용하는 경우에만 true로 설정
-                    var isHttps = httpContext.Request.IsHttps || 
-                                 httpContext.Request.Headers["X-Forwarded-Proto"].ToString().Equals("https", StringComparison.OrdinalIgnoreCase);
-                    var isSecure = isHttps; // HTTPS인 경우에만 Secure 쿠키
+                    // 실서버에서 HTTP를 사용하므로 항상 false로 설정
+                    var isSecure = false; // HTTP 환경에서는 항상 false
                     
                     _logger?.LogInformation("쿠키 설정: IsHttps={IsHttps}, X-Forwarded-Proto={XForwardedProto}, Secure={Secure}", 
                         httpContext.Request.IsHttps, 
-                        httpContext.Request.Headers["X-Forwarded-Proto"].ToString(), isSecure);
+                        httpContext.Request.Headers["X-Forwarded-Proto"].ToString(), 
+                        isSecure);
                     
                     var cookieOptions = new CookieOptions
                     {
@@ -412,11 +411,8 @@ public class AuthService
                         SameSite = SameSiteMode.Lax
                     };
                     
-                    // 환경에 따라 Secure 설정
-                    var isDevelopment = _environment?.IsDevelopment() ?? false;
-                    var isHttps = httpContext.Request.IsHttps || 
-                                 httpContext.Request.Headers["X-Forwarded-Proto"].ToString().Equals("https", StringComparison.OrdinalIgnoreCase);
-                    cookieOptions.Secure = !isDevelopment && isHttps;
+                    // HTTP 환경에서는 항상 Secure를 false로 설정
+                    cookieOptions.Secure = false;
                     
                     httpContext.Response.Cookies.Append("UserId", "", cookieOptions);
                     _logger?.LogInformation("쿠키 삭제 완료");
@@ -449,13 +445,84 @@ public class AuthService
 
         if (_currentUser != null)
         {
-            _currentUser = await _context.Users.FindAsync(_currentUser.Id);
+            var userId = _currentUser.Id;
+            
+            // 실서버 환경에서 안정적으로 작동하도록 변경 추적 처리
+            // 기존 추적된 엔티티가 있으면 분리
+            var trackedEntity = _context.Users.Local.FirstOrDefault(u => u.Id == userId);
+            if (trackedEntity != null)
+            {
+                _context.Entry(trackedEntity).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+            }
+            
+            // DB에서 최신 데이터 조회
+            var freshUser = await _context.Users.FindAsync(userId);
+            
+            if (freshUser != null)
+            {
+                _currentUser = freshUser;
+            }
         }
     }
 
     public void ResetUserLoad()
     {
         _userLoaded = false;
+        _currentUser = null;
+    }
+
+    public async Task<bool> LoadUserByIdAsync(int userId)
+    {
+        try
+        {
+            // 기존 추적된 엔티티가 있으면 분리
+            var trackedEntity = _context.Users.Local.FirstOrDefault(u => u.Id == userId);
+            if (trackedEntity != null)
+            {
+                _context.Entry(trackedEntity).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+            }
+            
+            var user = await _context.Users.FindAsync(userId);
+            if (user != null)
+            {
+                _currentUser = user;
+                _userLoaded = true;
+                _logger?.LogInformation("LoadUserByIdAsync: 사용자 로드 완료: {UserId}, {Username}, Balance: {Balance}", 
+                    userId, user.Username, user.Balance);
+                
+                // CurrentUser getter가 쿠키를 확인하므로, 쿠키도 확인
+                var httpContext = _httpContextAccessor.HttpContext;
+                if (httpContext != null && httpContext.Request.Cookies.TryGetValue("UserId", out var userIdCookie))
+                {
+                    if (int.TryParse(userIdCookie, out var cookieUserId) && cookieUserId == userId)
+                    {
+                        _logger?.LogInformation("LoadUserByIdAsync: 쿠키와 일치 확인됨");
+                    }
+                    else
+                    {
+                        _logger?.LogWarning("LoadUserByIdAsync: 쿠키의 UserId({CookieUserId})와 로드한 UserId({UserId})가 일치하지 않음", 
+                            cookieUserId, userId);
+                    }
+                }
+                
+                OnAuthStateChanged?.Invoke();
+                return true;
+            }
+            else
+            {
+                _logger?.LogWarning("LoadUserByIdAsync: 사용자를 찾을 수 없습니다: UserId {UserId}", userId);
+                _currentUser = null;
+                _userLoaded = true;
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "LoadUserByIdAsync: 사용자 로드 실패: UserId {UserId}", userId);
+            _currentUser = null;
+            _userLoaded = true;
+            return false;
+        }
     }
 }
 

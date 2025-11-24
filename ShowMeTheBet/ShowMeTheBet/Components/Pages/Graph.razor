@@ -1,15 +1,23 @@
 @page "/graph"
 @using ShowMeTheBet.Models
 @using ShowMeTheBet.Services
+@using Microsoft.JSInterop
 @inject GameService GameService
 @inject AuthService AuthService
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 @rendermode InteractiveServer
 @implements IAsyncDisposable
 
 <PageTitle>그래프 게임 - ShowMeTheBet</PageTitle>
 
-@if (!AuthService.IsAuthenticated)
+@if (isLoading)
+{
+    <div style="text-align: center; padding: 50px;">
+        <p>로딩 중...</p>
+    </div>
+}
+else if (!isAuthenticated)
 {
     <div class="auth-required">
         <div class="auth-message">
@@ -79,11 +87,25 @@ else
                                step="1000"
                                placeholder="금액 입력"
                                disabled="@(isGameRunning || gameFailed)" />
+                        <div class="quick-amount-buttons">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="async () => await SetBetAmount(0.25m)" disabled="@(balance <= 0 || isGameRunning || gameFailed || isLoading)">
+                                25%
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="async () => await SetBetAmount(0.50m)" disabled="@(balance <= 0 || isGameRunning || gameFailed || isLoading)">
+                                50%
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="async () => await SetBetAmount(0.75m)" disabled="@(balance <= 0 || isGameRunning || gameFailed || isLoading)">
+                                75%
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="async () => await SetBetAmount(1.00m)" disabled="@(balance <= 0 || isGameRunning || gameFailed || isLoading)">
+                                100%
+                            </button>
+                        </div>
                     </div>
                     <div class="game-controls">
                         @if (!isGameRunning && !gameFailed)
                         {
-                            <button class="btn btn-success btn-start" @onclick="StartGame" disabled="@(betAmount <= 0 || isLoading)">
+                            <button class="btn btn-success btn-start" @onclick="async () => await StartGame()" disabled="@(betAmount < 1000 || isLoading || (balance > 0 && balance < betAmount))">
                                 게임 시작
                             </button>
                         }
@@ -155,7 +177,8 @@ else
     private decimal betAmount = 0;
     private bool isGameRunning = false;
     private bool gameFailed = false;
-    private bool isLoading = false;
+    private bool isLoading = true;
+    private bool isAuthenticated = false;
     private List<GameBet>? bets;
     private System.Threading.Timer? timer;
     private System.Threading.Timer? failureCheckTimer;
@@ -169,20 +192,208 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        // 세션에서 사용자 정보 로드
-        AuthService.ResetUserLoad();
-        await AuthService.LoadUserFromSessionAsync();
+        isLoading = true;
+        StateHasChanged();
         
-        if (AuthService.IsAuthenticated || AuthService.CurrentUser != null)
+        try
         {
-            await LoadData();
+            // 실서버(IIS)에서 SignalR 연결의 HttpContext 접근 문제를 해결하기 위해
+            // JavaScript Interop을 통해 API를 호출하여 인증 상태 확인
+            try
+            {
+                var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
+                {
+                    // API 응답을 기반으로 사용자 정보 로드
+                    await AuthService.LoadUserByIdAsync(authResult.userId.Value);
+                    isAuthenticated = true;
+                    // API 응답의 balance를 사용하거나, RefreshUserAsync 후 GetBalanceAsync 호출
+                    if (authResult.balance.HasValue)
+                    {
+                        balance = authResult.balance.Value;
+                    }
+                    else
+                    {
+                        await AuthService.RefreshUserAsync();
+                        balance = await GameService.GetBalanceAsync();
+                    }
+                    // 나머지 데이터 로드
+                    bets = await GameService.GetGraphBetsAsync(authResult.userId.Value);
+                }
+                else
+                {
+                    // API 호출 실패 시 직접 확인 (로컬 환경 대비)
+                    AuthService.ResetUserLoad();
+                    await AuthService.LoadUserFromSessionAsync();
+                    var user = AuthService.CurrentUser;
+                    isAuthenticated = user != null;
+                    
+                    if (isAuthenticated)
+                    {
+                        await AuthService.RefreshUserAsync();
+                        balance = await GameService.GetBalanceAsync();
+                        // userId 가져오기
+                        int? userId = null;
+                        if (AuthService.CurrentUser != null)
+                        {
+                            userId = AuthService.CurrentUser.Id;
+                        }
+                        else
+                        {
+                            try
+                            {
+                                var authResult2 = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                                if (authResult2 != null && authResult2.authenticated && authResult2.userId.HasValue)
+                                {
+                                    userId = authResult2.userId.Value;
+                                }
+                            }
+                            catch { }
+                        }
+                        bets = await GameService.GetGraphBetsAsync(userId);
+                    }
+                }
+            }
+            catch
+            {
+                // API 호출 실패 시 직접 확인
+                AuthService.ResetUserLoad();
+                await AuthService.LoadUserFromSessionAsync();
+                var user = AuthService.CurrentUser;
+                isAuthenticated = user != null;
+                
+                if (isAuthenticated)
+                {
+                    await AuthService.RefreshUserAsync();
+                    balance = await GameService.GetBalanceAsync();
+                    // userId 가져오기
+                    int? userId2 = null;
+                    if (AuthService.CurrentUser != null)
+                    {
+                        userId2 = AuthService.CurrentUser.Id;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            var authResult3 = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                            if (authResult3 != null && authResult3.authenticated && authResult3.userId.HasValue)
+                            {
+                                userId2 = authResult3.userId.Value;
+                            }
+                        }
+                        catch { }
+                    }
+                    bets = await GameService.GetGraphBetsAsync(userId2);
+                }
+            }
         }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !isAuthenticated)
+        {
+            // 첫 렌더링 후에도 인증 상태를 다시 확인 (SignalR 연결 후 HttpContext가 설정될 수 있음)
+            await CheckAuthAndLoadData();
+        }
+    }
+
+    private async Task CheckAuthAndLoadData()
+    {
+        try
+        {
+            var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+            if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
+            {
+                var wasAuthenticated = isAuthenticated;
+                await AuthService.LoadUserByIdAsync(authResult.userId.Value);
+                isAuthenticated = true;
+                
+                if (!wasAuthenticated)
+                {
+                    // API 응답의 balance를 사용하거나, RefreshUserAsync 후 GetBalanceAsync 호출
+                    if (authResult.balance.HasValue)
+                    {
+                        balance = authResult.balance.Value;
+                    }
+                    else
+                    {
+                        await AuthService.RefreshUserAsync();
+                        balance = await GameService.GetBalanceAsync();
+                    }
+                    // userId 가져오기
+                    int? userId4 = null;
+                    if (AuthService.CurrentUser != null)
+                    {
+                        userId4 = AuthService.CurrentUser.Id;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            var authResult4 = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                            if (authResult4 != null && authResult4.authenticated && authResult4.userId.HasValue)
+                            {
+                                userId4 = authResult4.userId.Value;
+                            }
+                        }
+                        catch { }
+                    }
+                    bets = await GameService.GetGraphBetsAsync(userId4);
+                    StateHasChanged();
+                }
+            }
+        }
+        catch { }
+    }
+
+    private class AuthCheckResult
+    {
+        public bool success { get; set; }
+        public bool authenticated { get; set; }
+        public int? userId { get; set; }
+        public string? username { get; set; }
+        public decimal? balance { get; set; }
     }
 
     private async Task LoadData()
     {
-        balance = await GameService.GetBalanceAsync();
-        bets = await GameService.GetGraphBetsAsync();
+        // 사용자 정보를 최신화한 후 잔액 로드
+        await AuthService.RefreshUserAsync();
+        if (AuthService.CurrentUser != null)
+        {
+            balance = AuthService.CurrentUser.Balance;
+        }
+        else
+        {
+            balance = await GameService.GetBalanceAsync();
+        }
+        // userId 가져오기
+        int? userId5 = null;
+        if (AuthService.CurrentUser != null)
+        {
+            userId5 = AuthService.CurrentUser.Id;
+        }
+        else
+        {
+            try
+            {
+                var authResult5 = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                if (authResult5 != null && authResult5.authenticated && authResult5.userId.HasValue)
+                {
+                    userId5 = authResult5.userId.Value;
+                }
+            }
+            catch { }
+        }
+        bets = await GameService.GetGraphBetsAsync(userId5);
+        StateHasChanged();
     }
 
     private void OnBetAmountInput(ChangeEventArgs e)
@@ -194,94 +405,580 @@ else
         }
     }
 
-    private async Task StartGame()
+    private async Task SetBetAmount(decimal percentage)
     {
-        if (betAmount <= 0) return;
-
-        isLoading = true;
         try
         {
+            // JavaScript 콘솔에 로그 출력 (디버깅용)
+            await JSRuntime.InvokeVoidAsync("console.log", $"SetBetAmount 호출: {percentage * 100}%");
+            await JSRuntime.InvokeVoidAsync("console.log", $"현재 balance 변수 값: {balance}");
+        }
+        catch { }
+
+        try
+        {
+            // 현재 잔액을 먼저 확인 (RefreshUserAsync 호출 전)
+            decimal currentBalance = balance;
+            
+            // CurrentUser가 없으면 로드 시도
+            if (AuthService.CurrentUser == null)
+            {
+                await AuthService.LoadUserFromSessionAsync();
+            }
+            
+            // CurrentUser가 있으면 잔액 확인
+            if (AuthService.CurrentUser != null)
+            {
+                // RefreshUserAsync를 호출하지 않고 현재 잔액 사용
+                // (RefreshUserAsync가 잔액을 0으로 만들 수 있음)
+                currentBalance = AuthService.CurrentUser.Balance;
+                
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("console.log", $"CurrentUser.Balance: {currentBalance}");
+                }
+                catch { }
+            }
+            else
+            {
+                // CurrentUser가 없으면 API를 통해 잔액 가져오기
+                try
+                {
+                    var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                    if (authResult != null && authResult.authenticated && authResult.balance.HasValue)
+                    {
+                        currentBalance = authResult.balance.Value;
+                        await JSRuntime.InvokeVoidAsync("console.log", $"API에서 가져온 잔액: {currentBalance}");
+                    }
+                }
+                catch { }
+            }
+            
+            // 잔액이 0이면 RefreshUserAsync 시도 (최후의 수단)
+            if (currentBalance <= 0)
+            {
+                await AuthService.RefreshUserAsync();
+                if (AuthService.CurrentUser != null)
+                {
+                    currentBalance = AuthService.CurrentUser.Balance;
+                }
+            }
+            
+            balance = currentBalance;
+            
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("console.log", $"최종 잔액: {balance}, 설정할 비율: {percentage * 100}%");
+            }
+            catch { }
+            
+            if (balance > 0)
+            {
+                betAmount = Math.Floor(balance * percentage / 1000) * 1000; // 1000원 단위로 내림
+                if (betAmount < 1000) betAmount = 1000; // 최소 1000원
+                
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("console.log", $"설정된 베팅 금액: {betAmount}");
+                }
+                catch { }
+                
+                StateHasChanged();
+            }
+            else
+            {
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("console.error", "잔액이 0원입니다");
+                }
+                catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("console.error", $"SetBetAmount 오류: {ex.Message}");
+            }
+            catch { }
+        }
+    }
+
+    private async Task StartGame()
+    {
+        // JavaScript 콘솔에 로그 출력 (디버깅용)
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("console.log", "=== StartGame 메서드 호출됨 ===");
+            await JSRuntime.InvokeVoidAsync("console.log", $"베팅 금액: {betAmount}, 현재 잔액: {balance}");
+        }
+        catch { }
+
+        if (betAmount < 1000) 
+        {
+            // 최소 베팅 금액 체크
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("console.error", "베팅 금액이 1000원 미만입니다");
+            }
+            catch { }
+            return;
+        }
+
+        try
+        {
+            // 베팅 전에 사용자 정보 다시 로드 - 여러 방법으로 시도
+            if (AuthService.CurrentUser == null)
+            {
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("console.log", "CurrentUser가 null, 세션에서 로드 시도");
+                }
+                catch { }
+                
+                // 1. 세션에서 로드 시도
+                await AuthService.LoadUserFromSessionAsync();
+                
+                // 2. 여전히 null이면 API를 통해 로드
+                if (AuthService.CurrentUser == null)
+                {
+                    try
+                    {
+                        await JSRuntime.InvokeVoidAsync("console.log", "API를 통해 사용자 정보 로드 시도");
+                        var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                        if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
+                        {
+                            var loadSuccess = await AuthService.LoadUserByIdAsync(authResult.userId.Value);
+                            await Task.Delay(50); // SignalR 동기화 대기
+                            try
+                            {
+                                await JSRuntime.InvokeVoidAsync("console.log", $"LoadUserByIdAsync 결과: {loadSuccess}, CurrentUser: {(AuthService.CurrentUser != null ? AuthService.CurrentUser.Username : "null")}");
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            
+            // 잔액 확인 - RefreshUserAsync 호출 전에 현재 잔액 확인
+            decimal currentBalance = balance;
+            
+            // CurrentUser가 있으면 잔액 확인 (RefreshUserAsync 호출 전)
+            if (AuthService.CurrentUser != null)
+            {
+                currentBalance = AuthService.CurrentUser.Balance;
+            }
+            else
+            {
+                // CurrentUser가 없으면 API를 통해 잔액 가져오기
+                try
+                {
+                    var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                    if (authResult != null && authResult.authenticated && authResult.balance.HasValue)
+                    {
+                        currentBalance = authResult.balance.Value;
+                        // 사용자 정보도 로드
+                        if (authResult.userId.HasValue)
+                        {
+                            await AuthService.LoadUserByIdAsync(authResult.userId.Value);
+                        }
+                    }
+                }
+                catch { }
+            }
+            
+            // 잔액이 0이거나 부족하면 RefreshUserAsync 시도
+            if (currentBalance <= 0 || currentBalance < betAmount)
+            {
+                await AuthService.RefreshUserAsync();
+                if (AuthService.CurrentUser != null)
+                {
+                    var refreshedBalance = AuthService.CurrentUser.Balance;
+                    if (refreshedBalance > 0)
+                    {
+                        currentBalance = refreshedBalance;
+                    }
+                }
+            }
+            
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("console.log", $"현재 잔액: {currentBalance}, 베팅 금액: {betAmount}");
+            }
+            catch { }
+            
+            // 사용자 정보가 여전히 없으면 재시도
+            if (AuthService.CurrentUser == null)
+            {
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("console.warn", "사용자 정보를 찾을 수 없음, 재시도 중...");
+                }
+                catch { }
+                
+                // 최종 재시도: API를 통해 사용자 정보 로드
+                try
+                {
+                    var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                    if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
+                    {
+                        var loadSuccess = await AuthService.LoadUserByIdAsync(authResult.userId.Value);
+                        try
+                        {
+                            await JSRuntime.InvokeVoidAsync("console.log", $"LoadUserByIdAsync 결과: {loadSuccess}, UserId: {authResult.userId.Value}");
+                        }
+                        catch { }
+                        
+                        // LoadUserByIdAsync 후 약간의 지연 (SignalR 동기화 대기)
+                        await Task.Delay(50);
+                        
+                        // CurrentUser를 다시 확인
+                        if (AuthService.CurrentUser != null)
+                        {
+                            currentBalance = AuthService.CurrentUser.Balance;
+                            try
+                            {
+                                await JSRuntime.InvokeVoidAsync("console.log", $"재시도 후 사용자 로드 성공: {AuthService.CurrentUser.Username}, 잔액: {currentBalance}");
+                            }
+                            catch { }
+                        }
+                        else if (authResult.balance.HasValue)
+                        {
+                            // CurrentUser가 여전히 null이지만 API에서 잔액을 받았으면 사용
+                            currentBalance = authResult.balance.Value;
+                            try
+                            {
+                                await JSRuntime.InvokeVoidAsync("console.warn", $"CurrentUser는 null이지만 API 잔액 사용: {currentBalance}");
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        await JSRuntime.InvokeVoidAsync("console.error", $"재시도 중 오류: {ex.Message}");
+                    }
+                    catch { }
+                }
+                
+                // 사용자 정보가 없어도 API에서 userId를 받았으면 계속 진행
+                // GameService가 쿠키에서 직접 userId를 읽을 수 있음
+                if (AuthService.CurrentUser == null)
+                {
+                    // API에서 userId를 받았는지 확인
+                    try
+                    {
+                        var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                        if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
+                        {
+                            // API에서 인증 정보를 받았으면 계속 진행 (GameService가 쿠키에서 userId를 읽음)
+                            try
+                            {
+                                await JSRuntime.InvokeVoidAsync("console.log", $"CurrentUser는 null이지만 API 인증 확인됨, 게임 진행: UserId {authResult.userId.Value}");
+                            }
+                            catch { }
+                        }
+                        else
+                        {
+                            // API에서도 인증 정보를 받지 못했으면 에러
+                            try
+                            {
+                                await JSRuntime.InvokeVoidAsync("console.error", "사용자 정보를 찾을 수 없습니다");
+                            }
+                            catch { }
+                            isLoading = false;
+                            await LoadData();
+                            StateHasChanged();
+                            return;
+                        }
+                    }
+                    catch
+                    {
+                        // API 호출 실패 시 에러
+                        try
+                        {
+                            await JSRuntime.InvokeVoidAsync("console.error", "사용자 정보를 찾을 수 없습니다");
+                        }
+                        catch { }
+                        isLoading = false;
+                        await LoadData();
+                        StateHasChanged();
+                        return;
+                    }
+                }
+            }
+            
+            if (currentBalance < betAmount)
+            {
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("console.error", $"잔액 부족: {currentBalance} < {betAmount}");
+                }
+                catch { }
+                isLoading = false;
+                balance = currentBalance;
+                await LoadData();
+                StateHasChanged();
+                return;
+            }
+            
             // 먼저 베팅 금액 차감
-            var success = await GameService.StartGraphGameAsync(betAmount);
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("console.log", "베팅 금액 차감 시작");
+            }
+            catch { }
+            
+            // API에서 userId 가져오기 (CurrentUser가 null인 경우)
+            int? userId = null;
+            if (AuthService.CurrentUser != null)
+            {
+                userId = AuthService.CurrentUser.Id;
+            }
+            else
+            {
+                try
+                {
+                    var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                    if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
+                    {
+                        userId = authResult.userId.Value;
+                        try
+                        {
+                            await JSRuntime.InvokeVoidAsync("console.log", $"API에서 userId 가져옴: {userId.Value}");
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+            
+            bool success = false;
+            try
+            {
+                success = await GameService.StartGraphGameAsync(betAmount, userId);
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("console.log", $"베팅 결과: {success}");
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("console.error", $"베팅 중 예외 발생: {ex.Message}");
+                }
+                catch { }
+                isLoading = false;
+                await LoadData();
+                StateHasChanged();
+                return;
+            }
+            
             if (!success)
             {
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("console.error", "베팅 실패 - GameService.StartGraphGameAsync가 false를 반환했습니다. 서버 로그를 확인하세요.");
+                }
+                catch { }
+                isLoading = false;
                 await LoadData();
+                StateHasChanged();
                 return;
             }
 
-            // 게임 시작
+            // 게임 시작 - 즉시 시작
             isGameRunning = true;
             gameFailed = false;
             currentMultiplier = MinMultiplier;
             gameStartTime = DateTime.Now;
             graphPoints.Clear();
-            await LoadData();
+            
+            // 잔액 즉시 차감 (베팅 금액만큼)
+            balance -= betAmount;
+            
+            // 잔액 업데이트와 베팅 내역은 백그라운드에서 처리
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    // 잔액 업데이트 (베팅 후 차감된 잔액) - DB에서 최신 정보 가져오기
+                    await AuthService.RefreshUserAsync();
+                    if (AuthService.CurrentUser != null)
+                    {
+                        await InvokeAsync(() =>
+                        {
+                            balance = AuthService.CurrentUser.Balance;
+                            StateHasChanged();
+                        });
+                    }
+                    
+                    // 베팅 내역 업데이트
+                    int? userId6 = null;
+                    if (AuthService.CurrentUser != null)
+                    {
+                        userId6 = AuthService.CurrentUser.Id;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            var authResult6 = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                            if (authResult6 != null && authResult6.authenticated && authResult6.userId.HasValue)
+                            {
+                                userId6 = authResult6.userId.Value;
+                            }
+                        }
+                        catch { }
+                    }
+                    
+                    var updatedBets = await GameService.GetGraphBetsAsync(userId6);
+                    await InvokeAsync(() =>
+                    {
+                        bets = updatedBets;
+                        StateHasChanged();
+                    });
+                }
+                catch { }
+            });
+            
+            StateHasChanged();
 
             // 그래프 부드럽게 업데이트 (50ms마다)
             timer = new System.Threading.Timer(async _ =>
             {
-                await InvokeAsync(() =>
+                try
                 {
-                    if (!isGameRunning || gameFailed) return;
-
-                    var elapsed = (DateTime.Now - gameStartTime).TotalSeconds;
-                    
-                    // 배수 계산: 30초 동안 1.0 -> 5.0 (곡선형 - easeOutCubic)
-                    var progress = Math.Min(elapsed / GameDurationSeconds, 1.0);
-                    var easedProgress = 1 - Math.Pow(1 - progress, 3); // easeOutCubic 곡선
-                    currentMultiplier = MinMultiplier + (MaxMultiplier - MinMultiplier) * (decimal)easedProgress;
-
-                    // 그래프 포인트 추가 (최대 100개 유지)
-                    if (graphPoints.Count < 100)
+                    await InvokeAsync(() =>
                     {
-                        graphPoints.Add((elapsed * 400 / GameDurationSeconds, 300 - (double)currentMultiplier * 60));
-                    }
-                    else
-                    {
-                        graphPoints.RemoveAt(0);
-                        graphPoints.Add((elapsed * 400 / GameDurationSeconds, 300 - (double)currentMultiplier * 60));
-                    }
+                        if (!isGameRunning || gameFailed) return;
 
-                    if (currentMultiplier >= MaxMultiplier)
-                    {
-                        currentMultiplier = MaxMultiplier;
-                    }
+                        var elapsed = (DateTime.Now - gameStartTime).TotalSeconds;
+                        
+                        // 배수 계산: 30초 동안 1.0 -> 5.0 (곡선형 - easeOutCubic)
+                        var progress = Math.Min(elapsed / GameDurationSeconds, 1.0);
+                        var easedProgress = 1 - Math.Pow(1 - progress, 3); // easeOutCubic 곡선
+                        currentMultiplier = MinMultiplier + (MaxMultiplier - MinMultiplier) * (decimal)easedProgress;
 
-                    StateHasChanged();
-                });
+                        // 그래프 포인트 추가 (최대 100개 유지)
+                        if (graphPoints.Count < 100)
+                        {
+                            graphPoints.Add((elapsed * 400 / GameDurationSeconds, 300 - (double)currentMultiplier * 60));
+                        }
+                        else
+                        {
+                            graphPoints.RemoveAt(0);
+                            graphPoints.Add((elapsed * 400 / GameDurationSeconds, 300 - (double)currentMultiplier * 60));
+                        }
+
+                        if (currentMultiplier >= MaxMultiplier)
+                        {
+                            currentMultiplier = MaxMultiplier;
+                        }
+
+                        StateHasChanged();
+                    });
+                }
+                catch
+                {
+                    // SignalR 연결 오류 시 무시
+                }
             }, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(50));
 
             // 실패 체크는 1초마다
             failureCheckTimer = new System.Threading.Timer(async _ =>
             {
-                await InvokeAsync(() =>
+                try
                 {
-                    if (!isGameRunning || gameFailed) return;
-
-                    // 1초마다 5% 확률로 실패
-                    if (random.NextDouble() < FailureChancePerSecond)
+                    await InvokeAsync(() =>
                     {
-                        // 게임 실패
-                        gameFailed = true;
-                        isGameRunning = false;
-                        
-                        // 실패 처리
-                        _ = Task.Run(async () =>
+                        if (!isGameRunning || gameFailed) return;
+
+                        // 1초마다 5% 확률로 실패
+                        if (random.NextDouble() < FailureChancePerSecond)
                         {
-                            await InvokeAsync(async () =>
+                            // 게임 실패
+                            gameFailed = true;
+                            isGameRunning = false;
+                            
+                            // 실패 처리 - 즉시 UI 업데이트
+                            StateHasChanged();
+                            
+                            // 백그라운드에서 서버 처리 및 정확한 잔액 업데이트
+                            _ = Task.Run(async () =>
                             {
-                                await GameService.FailGraphGameAsync(betAmount);
-                                await LoadData();
-                                StateHasChanged();
+                                try
+                                {
+                                    await GameService.FailGraphGameAsync(betAmount);
+                                    
+                                    // 잔액 업데이트 (실패 후 잔액은 이미 차감됨)
+                                    await AuthService.RefreshUserAsync();
+                                    if (AuthService.CurrentUser != null)
+                                    {
+                                        await InvokeAsync(() =>
+                                        {
+                                            balance = AuthService.CurrentUser.Balance;
+                                            StateHasChanged();
+                                        });
+                                    }
+                                    
+                                    // 나머지 데이터 로드
+                                    int? userId7 = null;
+                                    if (AuthService.CurrentUser != null)
+                                    {
+                                        userId7 = AuthService.CurrentUser.Id;
+                                    }
+                                    else
+                                    {
+                                        try
+                                        {
+                                            var authResult7 = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                                            if (authResult7 != null && authResult7.authenticated && authResult7.userId.HasValue)
+                                            {
+                                                userId7 = authResult7.userId.Value;
+                                            }
+                                        }
+                                        catch { }
+                                    }
+                                    
+                                    var updatedBets = await GameService.GetGraphBetsAsync(userId7);
+                                    await InvokeAsync(() =>
+                                    {
+                                        bets = updatedBets;
+                                        StateHasChanged();
+                                    });
+                                }
+                                catch
+                                {
+                                    // SignalR 연결 오류 시 무시
+                                }
                             });
-                        });
-                    }
-                });
+                        }
+                    });
+                }
+                catch
+                {
+                    // SignalR 연결 오류 시 무시
+                }
             }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         }
-        finally
+        catch (Exception ex)
         {
-            isLoading = false;
+            // 에러 발생 시 로그 출력
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("console.error", $"StartGame 오류: {ex.Message}");
+            }
+            catch { }
+            
+            // 에러 발생 시 게임 상태 초기화
+            isGameRunning = false;
+            gameFailed = false;
             StateHasChanged();
         }
     }
@@ -291,7 +988,6 @@ else
         if (!isGameRunning || betAmount <= 0 || gameFailed) return;
 
         isGameRunning = false;
-        isLoading = true;
 
         if (timer != null)
         {
@@ -306,17 +1002,71 @@ else
 
         try
         {
-            var success = await GameService.StopGraphGameAsync(betAmount, currentMultiplier);
+            // 베팅 전에 사용자 정보 다시 로드
+            if (AuthService.CurrentUser == null)
+            {
+                await AuthService.LoadUserFromSessionAsync();
+            }
+            
+            // userId 가져오기
+            int? userId = null;
+            if (AuthService.CurrentUser != null)
+            {
+                userId = AuthService.CurrentUser.Id;
+            }
+            else
+            {
+                try
+                {
+                    var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
+                    if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
+                    {
+                        userId = authResult.userId.Value;
+                    }
+                }
+                catch { }
+            }
+            
+            var winAmount = betAmount * currentMultiplier;
+            var success = await GameService.StopGraphGameAsync(betAmount, currentMultiplier, userId);
             if (success)
             {
                 betAmount = 0;
                 currentMultiplier = MinMultiplier;
-                await LoadData();
+                
+                // 잔액 즉시 업데이트 (승리 금액 추가)
+                balance += winAmount;
+                StateHasChanged();
+                
+                // 백그라운드에서 정확한 잔액과 베팅 내역 업데이트
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await AuthService.RefreshUserAsync();
+                        if (AuthService.CurrentUser != null)
+                        {
+                            await InvokeAsync(() =>
+                            {
+                                balance = AuthService.CurrentUser.Balance;
+                                StateHasChanged();
+                            });
+                        }
+                        
+                        var updatedBets = await GameService.GetGraphBetsAsync(userId);
+                        await InvokeAsync(() =>
+                        {
+                            bets = updatedBets;
+                            StateHasChanged();
+                        });
+                    }
+                    catch { }
+                });
             }
         }
-        finally
+        catch
         {
-            isLoading = false;
+            // 에러 발생 시에도 UI 업데이트
             StateHasChanged();
         }
     }
