@@ -9,15 +9,40 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Add controllers for API endpoints
+builder.Services.AddControllers();
+
 // Database
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<BettingDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
+// Session
+builder.Services.AddDistributedMemoryCache();
+builder.Services.AddSession(options =>
+{
+    options.IdleTimeout = TimeSpan.FromMinutes(30);
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    // 로컬 개발 환경에서는 SecurePolicy를 None으로 설정
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() 
+        ? CookieSecurePolicy.None 
+        : CookieSecurePolicy.SameAsRequest;
+    options.Cookie.Path = "/";
+    options.Cookie.Name = ".ShowMeTheBet.Session";
+    // 쿠키가 항상 설정되도록
+    options.Cookie.MaxAge = TimeSpan.FromMinutes(30);
+});
+
 // Services
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<BettingService>();
 builder.Services.AddScoped<GameService>();
+builder.Services.AddHttpContextAccessor();
+
+// HttpClient 설정
+builder.Services.AddHttpClient();
 
 var app = builder.Build();
 
@@ -78,10 +103,14 @@ if (!app.Environment.IsDevelopment())
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
 
+app.UseSession();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+// Map API controllers
+app.MapControllers();
 
 app.Run();

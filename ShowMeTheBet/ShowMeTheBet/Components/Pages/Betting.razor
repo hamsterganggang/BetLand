@@ -1,4 +1,4 @@
-@page "/"
+@page "/game"
 @using ShowMeTheBet.Models
 @using ShowMeTheBet.Services
 @inject BettingService BettingService
@@ -62,9 +62,32 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        if (AuthService.IsAuthenticated)
+        // 세션에서 사용자 정보 로드 (재시도 로직 포함)
+        AuthService.ResetUserLoad();
+        
+        // 세션 로드를 여러 번 시도 (최대 10번, 더 긴 대기 시간)
+        bool isAuthenticated = false;
+        for (int i = 0; i < 10; i++)
+        {
+            AuthService.ResetUserLoad(); // 매번 리셋하여 강제로 다시 로드
+            await AuthService.LoadUserFromSessionAsync();
+            isAuthenticated = AuthService.IsAuthenticated;
+            if (isAuthenticated)
+            {
+                break;
+            }
+            // 각 시도 사이에 대기 (점진적으로 증가)
+            await Task.Delay(50 * (i + 1));
+        }
+        
+        if (isAuthenticated)
         {
             balance = await BettingService.GetBalanceAsync();
+        }
+        else
+        {
+            // 로그인되지 않은 경우 로그인 페이지로 리다이렉트
+            Navigation.NavigateTo("/login");
         }
     }
 

@@ -1,7 +1,9 @@
 @page "/register"
 @using ShowMeTheBet.Services
+@using Microsoft.JSInterop
 @inject AuthService AuthService
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 @rendermode InteractiveServer
 
 <PageTitle>회원가입 - ShowMeTheBet</PageTitle>
@@ -98,11 +100,15 @@
     private string successMessage = string.Empty;
     private bool isLoading = false;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
+        // 세션에서 사용자 정보 로드
+        AuthService.ResetUserLoad();
+        await AuthService.LoadUserFromSessionAsync();
+        
         if (AuthService.IsAuthenticated)
         {
-            Navigation.NavigateTo("/");
+            Navigation.NavigateTo("/game");
         }
     }
 
@@ -180,7 +186,12 @@
                 var loginSuccess = await AuthService.LoginAsync(username, password);
                 if (loginSuccess)
                 {
-                    Navigation.NavigateTo("/");
+                    // 세션이 확실히 저장되도록 대기
+                    await Task.Delay(500);
+                    
+                    // JavaScript로 강제 페이지 리로드하여 게임 선택 페이지로 이동
+                    await JSRuntime.InvokeVoidAsync("navigateToGame");
+                    return; // 페이지 이동하므로 여기서 종료
                 }
                 else
                 {

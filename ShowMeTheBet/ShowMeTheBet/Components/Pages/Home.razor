@@ -1,0 +1,27 @@
+@page "/"
+@using ShowMeTheBet.Services
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>ShowMeTheBet</PageTitle>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        // 세션에서 사용자 정보 로드
+        AuthService.ResetUserLoad();
+        await AuthService.LoadUserFromSessionAsync();
+        
+        // 루트 경로 접근 시 로그인 상태에 따라 리다이렉트
+        if (AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/game");
+        }
+        else
+        {
+            Navigation.NavigateTo("/login");
+        }
+    }
+}
+

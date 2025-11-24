@@ -1,7 +1,11 @@
 @page "/login"
 @using ShowMeTheBet.Services
+@using Microsoft.JSInterop
+@using System.Net.Http.Json
 @inject AuthService AuthService
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+@inject HttpClient HttpClient
 @rendermode InteractiveServer
 
 <PageTitle>로그인 - ShowMeTheBet</PageTitle>
@@ -20,17 +24,18 @@
             </div>
         }
 
+        <form method="post" action="/api/auth/login" id="loginForm">
             <div class="login-form">
                 <h3>로그인</h3>
                 <div class="mb-3">
                     <label for="username" class="form-label">사용자명</label>
-                    <input type="text" class="form-control" id="username" @bind="username" placeholder="사용자명을 입력하세요" />
+                    <input type="text" class="form-control" id="username" name="username" @bind="username" placeholder="사용자명을 입력하세요" required />
                 </div>
                 <div class="mb-3">
                     <label for="password" class="form-label">비밀번호</label>
-                    <input type="password" class="form-control" id="password" @bind="password" @onkeypress="HandleKeyPress" placeholder="비밀번호를 입력하세요" />
+                    <input type="password" class="form-control" id="password" name="password" @bind="password" @onkeypress="HandleKeyPress" placeholder="비밀번호를 입력하세요" required />
                 </div>
-                <button class="btn btn-primary w-100 mb-3" @onclick="HandleLogin" disabled="@isLoading">
+                <button type="button" class="btn btn-primary w-100 mb-3" @onclick="HandleLogin" disabled="@isLoading">
                     @if (isLoading)
                     {
                         <span class="spinner-border spinner-border-sm me-2" role="status"></span>
@@ -41,7 +46,7 @@
                     <p class="mb-0">계정이 없으신가요? <a href="/register">회원가입</a></p>
                 </div>
             </div>
-        }
+        </form>
     </div>
 </div>
 
@@ -51,11 +56,15 @@
     private string errorMessage = string.Empty;
     private bool isLoading = false;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
+        // 세션에서 사용자 정보 로드
+        AuthService.ResetUserLoad();
+        await AuthService.LoadUserFromSessionAsync();
+        
         if (AuthService.IsAuthenticated)
         {
-            Navigation.NavigateTo("/");
+            Navigation.NavigateTo("/game");
         }
     }
 
@@ -70,17 +79,42 @@
         }
 
         isLoading = true;
+        StateHasChanged();
+        
         try
         {
-            var success = await AuthService.LoginAsync(username, password);
-            if (success)
-            {
-                Navigation.NavigateTo("/");
-            }
-            else
-            {
-                errorMessage = "사용자명 또는 비밀번호가 올바르지 않습니다.";
-            }
+            // JavaScript fetch를 사용하여 API 호출 (쿠키 자동 포함)
+            var loginData = new { Username = username, Password = password };
+            var json = System.Text.Json.JsonSerializer.Serialize(loginData);
+            
+            await JSRuntime.InvokeVoidAsync("eval", $@"
+                (async function() {{
+                    try {{
+                        const response = await fetch('/api/auth/login', {{
+                            method: 'POST',
+                            headers: {{
+                                'Content-Type': 'application/json',
+                            }},
+                            credentials: 'include',
+                            body: JSON.stringify({json})
+                        }});
+                        
+                        const data = await response.json();
+                        if (data.success) {{
+                            window.location.href = '/game';
+                        }} else {{
+                            // 에러는 서버에서 처리하므로 페이지 리로드
+                            window.location.reload();
+                        }}
+                    }} catch (error) {{
+                        console.error('로그인 오류:', error);
+                        window.location.reload();
+                    }}
+                }})();
+            ");
+            
+            // JavaScript가 실행되므로 여기서 종료
+            return;
         }
         catch (Exception ex)
         {
@@ -89,7 +123,20 @@
         finally
         {
             isLoading = false;
+            StateHasChanged();
         }
+    }
+
+    private class LoginResponse
+    {
+        public bool Success { get; set; }
+        public string? RedirectUrl { get; set; }
+    }
+
+    private class LoginErrorResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
     }
 
 

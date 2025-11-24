@@ -7,7 +7,7 @@
     <div class="top-navbar">
         <div class="navbar-container">
             <div class="navbar-left">
-                <a class="navbar-brand" href="/">⚽ ShowMeTheBet</a>
+                <a class="navbar-brand" href="/game">⚽ ShowMeTheBet</a>
                 <div class="navbar-menu">
                     <NavLink class="nav-menu-item" href="/ranking" Match="NavLinkMatch.Prefix">
                         <span class="bi bi-trophy-fill"></span> 부자랭킹
@@ -71,6 +71,13 @@
         AuthService.Logout();
         StateHasChanged();
         Navigation.NavigateTo("/login");
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 세션에서 사용자 정보 로드
+        AuthService.ResetUserLoad();
+        await AuthService.LoadUserFromSessionAsync();
     }
 
     protected override void OnAfterRender(bool firstRender)
