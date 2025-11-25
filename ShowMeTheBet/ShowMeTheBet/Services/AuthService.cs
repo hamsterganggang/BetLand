@@ -74,7 +74,12 @@ public class AuthService
     {
         get
         {
-            // 항상 쿠키에서 확인 (IIS 환경에서 가장 안정적)
+            // 이미 메모리에 사용자 정보가 있으면 그대로 반환
+            if (_currentUser != null && _userLoaded)
+            {
+                return _currentUser;
+            }
+
             var httpContext = _httpContextAccessor.HttpContext;
             if (httpContext != null && httpContext.Request.Cookies.TryGetValue("UserId", out var userIdCookie))
             {
@@ -94,36 +99,16 @@ public class AuthService
                             else
                             {
                                 _logger?.LogWarning("CurrentUser getter: 사용자를 찾을 수 없습니다: UserId {UserId}", userId);
-                                _currentUser = null;
                             }
                         }
                         catch (Exception ex)
                         {
                             _logger?.LogError(ex, "CurrentUser getter에서 사용자 로드 실패: {UserId}", userId);
-                            _currentUser = null;
                         }
                     }
                 }
-                else
-                {
-                    // 쿠키에 유효하지 않은 값이 있으면 null로 설정
-                    if (_currentUser != null)
-                    {
-                        _currentUser = null;
-                        _userLoaded = false;
-                    }
-                }
             }
-            else
-            {
-                // 쿠키가 없으면 null로 설정
-                if (_currentUser != null)
-                {
-                    _currentUser = null;
-                    _userLoaded = false;
-                }
-            }
-            
+
             return _currentUser;
         }
     }
@@ -266,7 +251,6 @@ public class AuthService
         {
             _logger?.LogWarning("LoadUserFromSessionAsync: HttpContext가 null입니다");
             _userLoaded = true;
-            _currentUser = null;
             return;
         }
 
@@ -334,19 +318,16 @@ public class AuthService
                 else
                 {
                     _logger?.LogWarning("사용자를 찾을 수 없습니다: UserId {UserId}", userId);
-                    _currentUser = null;
                 }
             }
             else
             {
                 _logger?.LogWarning("유효한 UserId를 찾을 수 없습니다");
-                _currentUser = null;
             }
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "LoadUserFromSessionAsync 중 오류 발생");
-            _currentUser = null;
         }
 
         _userLoaded = true;

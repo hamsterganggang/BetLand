@@ -82,11 +82,18 @@ public class GraphViewModel : GamePageViewModel
 
     public decimal PotentialWin => BetAmount * CurrentMultiplier;
 
-    public Task InitializeAsync() => base.InitializeAsync(async _ => await LoadBetsAsync());
+    public Task InitializeAsync() => base.InitializeAsync(async userId => await LoadBetsAsync(userId));
 
-    private async Task LoadBetsAsync()
+    private async Task LoadBetsAsync(int? userId = null)
     {
-        Bets = await _gameService.GetGraphBetsAsync();
+        if (userId.HasValue)
+        {
+            Bets = await _gameService.GetGraphBetsAsync(userId.Value);
+        }
+        else
+        {
+            Bets = await _gameService.GetGraphBetsAsync();
+        }
     }
 
     public async Task UpdateBetAmountFromInputAsync(string? value)
@@ -149,7 +156,7 @@ public class GraphViewModel : GamePageViewModel
         OnPropertyChanged(nameof(GraphPoints));
 
         StartTimers();
-        await LoadBetsAsync();
+        await LoadBetsAsync(userId);
     }
 
     public async Task StopGameAsync()
@@ -169,7 +176,7 @@ public class GraphViewModel : GamePageViewModel
             BetAmount = 0;
             CurrentMultiplier = MinMultiplierValue;
             await RefreshBalanceAsync();
-            await LoadBetsAsync();
+            await LoadBetsAsync(userId);
         }
     }
 
@@ -273,7 +280,7 @@ public class GraphViewModel : GamePageViewModel
 
         await _gameService.FailGraphGameAsync(BetAmount);
         await RefreshBalanceAsync();
-        await LoadBetsAsync();
+        await LoadBetsAsync(await AuthHelper.GetUserIdAsync());
     }
 
     private void StopTimers()
