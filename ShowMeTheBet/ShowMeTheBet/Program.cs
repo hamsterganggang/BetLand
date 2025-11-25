@@ -128,6 +128,7 @@ builder.Services.AddScoped<BettingViewModel>();   // MVVM ViewModel (게임 선�
 builder.Services.AddScoped<SportsViewModel>();    // 스포츠 토토 페이지 ViewModel
 builder.Services.AddScoped<GraphViewModel>();     // 그래프 게임 페이지 ViewModel
 builder.Services.AddScoped<OddEvenViewModel>();   // 홀짝 게임 페이지 ViewModel
+builder.Services.AddScoped<RouletteViewModel>();  // 룰렛 게임 페이지 ViewModel
 builder.Services.AddScoped<BetHistoryViewModel>(); // 베팅 내역 페이지 ViewModel
 builder.Services.AddScoped<RankingViewModel>();   // 랭킹 페이지 ViewModel
 builder.Services.AddScoped<AuthPageService>();    // 로그인/회원가입/홈 서비스

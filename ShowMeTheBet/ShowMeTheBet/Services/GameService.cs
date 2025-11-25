@@ -31,6 +31,17 @@ public class GameService
     /// HTTP 컨텍스트 접근자 - 쿠키에서 userId 가져오기용
     /// </summary>
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private static readonly RouletteSlot[] _rouletteSlots = new[]
+    {
+        new RouletteSlot("꽝", 0m),
+        new RouletteSlot("꽝", 0m),
+        new RouletteSlot("꽝", 0m),
+        new RouletteSlot("꽝", 0m),
+        new RouletteSlot("x2", 2m),
+        new RouletteSlot("x3", 3m),
+        new RouletteSlot("x4", 4m),
+        new RouletteSlot("x5", 5m)
+    };
     
     /// <summary>
     /// 마지막 홀짝 결과 생성 시간 (캐싱용)
@@ -559,6 +570,89 @@ public class GameService
     }
 
     /// <summary>
+    /// 룰렛 게임을 실행합니다.
+    /// </summary>
+    public async Task<RouletteSpinResult> PlayRouletteAsync(decimal amount, int? userId = null)
+    {
+        if (amount < 1000m)
+        {
+            return RouletteSpinResult.Fail("최소 베팅 금액은 1,000원입니다.");
+        }
+
+        userId = await GetUserIdAsync(userId);
+        if (!userId.HasValue)
+        {
+            return RouletteSpinResult.Fail("사용자 정보를 찾을 수 없습니다.");
+        }
+
+        var user = await _context.Users.FindAsync(userId.Value);
+        if (user == null)
+        {
+            return RouletteSpinResult.Fail("사용자를 찾을 수 없습니다.");
+        }
+
+        if (user.Balance < amount)
+        {
+            return RouletteSpinResult.Fail("잔액이 부족합니다.", user.Balance);
+        }
+
+        user.Balance -= amount;
+
+        var slot = _rouletteSlots[Random.Shared.Next(_rouletteSlots.Length)];
+        var winAmount = slot.Multiplier > 0 ? amount * slot.Multiplier : 0m;
+        var status = slot.Multiplier > 0 ? GameBetStatus.Won : GameBetStatus.Lost;
+
+        if (status == GameBetStatus.Won)
+        {
+            user.Balance += winAmount;
+        }
+
+        var bet = new GameBet
+        {
+            UserId = user.Id,
+            GameType = GameType.Roulette,
+            BetChoice = slot.Label,
+            Amount = amount,
+            Multiplier = slot.Multiplier,
+            WinAmount = winAmount,
+            BetTime = DateTime.Now,
+            Status = status,
+            Result = slot.Label
+        };
+
+        _context.GameBets.Add(bet);
+        await _context.SaveChangesAsync();
+        await _authService.RefreshUserAsync();
+
+        var message = status == GameBetStatus.Won
+            ? $"축하합니다! {slot.Label}에 당첨되었습니다."
+            : "아쉽지만 꽝입니다.";
+
+        return new RouletteSpinResult(
+            true,
+            status == GameBetStatus.Won,
+            slot.Label,
+            slot.Multiplier,
+            winAmount,
+            user.Balance,
+            message);
+    }
+
+    /// <summary>
+    /// 룰렛 베팅 내역을 조회합니다.
+    /// </summary>
+    public async Task<List<GameBet>> GetRouletteBetsAsync(int? userId = null)
+    {
+        userId = await GetUserIdAsync(userId);
+        if (!userId.HasValue) return new List<GameBet>();
+
+        return await _context.GameBets
+            .Where(b => b.UserId == userId.Value && b.GameType == GameType.Roulette)
+            .OrderByDescending(b => b.BetTime)
+            .ToListAsync();
+    }
+
+    /// <summary>
     /// 현재 사용자의 잔액을 반환합니다.
     /// </summary>
     /// <returns>사용자 잔액 (인증되지 않았으면 0)</returns>
@@ -569,4 +663,6 @@ public class GameService
         return _authService.CurrentUser?.Balance ?? 0;
     }
     #endregion
+
+    private record RouletteSlot(string Label, decimal Multiplier);
 }

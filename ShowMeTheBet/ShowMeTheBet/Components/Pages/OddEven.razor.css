@@ -1,0 +1,87 @@
+.round-info {
+    position: relative;
+}
+
+.shuffle-overlay {
+    margin-top: 16px;
+    padding: 18px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));
+    box-shadow: inset 0 0 20px rgba(120, 100, 200, 0.25);
+    text-align: center;
+}
+
+.shuffle-circle {
+    width: 140px;
+    height: 140px;
+    margin: 0 auto 12px auto;
+    position: relative;
+    animation: spin-cups 1.6s linear infinite;
+}
+
+.cup {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.3);
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: -40px -40px;
+}
+
+.cup-1 {
+    transform: rotate(0deg) translate(50px);
+}
+
+.cup-2 {
+    transform: rotate(120deg) translate(50px);
+}
+
+.cup-3 {
+    transform: rotate(240deg) translate(50px);
+}
+
+.parity-hint {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.parity-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+    animation: pulse 0.8s ease-in-out infinite alternate;
+}
+
+.revealing-text {
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.05em;
+}
+
+@keyframes spin-cups {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes pulse {
+    from {
+        transform: scale(0.9);
+        opacity: 0.7;
+    }
+    to {
+        transform: scale(1.1);
+        opacity: 1;
+    }
+}
+

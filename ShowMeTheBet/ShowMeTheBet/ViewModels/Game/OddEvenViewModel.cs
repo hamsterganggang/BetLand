@@ -13,6 +13,9 @@ public class OddEvenViewModel : GamePageViewModel
     private readonly GameService _gameService;
     private readonly ILogger<OddEvenViewModel>? _logger;
     private System.Threading.Timer? _roundTimer;
+    private readonly object _animationLock = new();
+    private DateTime _revealEndTime = DateTime.MinValue;
+    private const int RevealDurationSeconds = 3;
 
     private int _timeLeft = 30;
     private string _currentResult = "홀";
@@ -20,6 +23,9 @@ public class OddEvenViewModel : GamePageViewModel
     private decimal _betAmount;
     private List<GameBet> _bets = new();
     private bool _isPlacingBet;
+    private bool _isRevealAnimation;
+    private int _animationCupCount;
+    private string _animationResult = string.Empty;
 
     public OddEvenViewModel(
         AuthService authService,
@@ -65,6 +71,24 @@ public class OddEvenViewModel : GamePageViewModel
     {
         get => _isPlacingBet;
         private set => SetProperty(ref _isPlacingBet, value);
+    }
+
+    public bool IsRevealAnimation
+    {
+        get => _isRevealAnimation;
+        private set => SetProperty(ref _isRevealAnimation, value);
+    }
+
+    public int AnimationCupCount
+    {
+        get => _animationCupCount;
+        private set => SetProperty(ref _animationCupCount, value);
+    }
+
+    public string AnimationResult
+    {
+        get => _animationResult;
+        private set => SetProperty(ref _animationResult, value);
     }
 
     public bool IsBetDisabled =>
@@ -214,6 +238,12 @@ public class OddEvenViewModel : GamePageViewModel
         if (previous == 30 && newTimeLeft < 30)
         {
             await RefreshRoundDataAsync();
+            StartRevealAnimation();
+        }
+
+        if (IsRevealAnimation && DateTime.UtcNow >= _revealEndTime)
+        {
+            StopRevealAnimation();
         }
     }
 
@@ -227,6 +257,25 @@ public class OddEvenViewModel : GamePageViewModel
     {
         StopTimer();
         base.Dispose();
+    }
+
+    private void StartRevealAnimation()
+    {
+        lock (_animationLock)
+        {
+            AnimationResult = CurrentResult;
+            AnimationCupCount = CurrentResult == "짝" ? 2 : 3;
+            IsRevealAnimation = true;
+            _revealEndTime = DateTime.UtcNow.AddSeconds(RevealDurationSeconds);
+        }
+    }
+
+    private void StopRevealAnimation()
+    {
+        lock (_animationLock)
+        {
+            IsRevealAnimation = false;
+        }
     }
 }
 

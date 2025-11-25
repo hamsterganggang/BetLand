@@ -1,0 +1,152 @@
+@page "/roulette"
+@using ShowMeTheBet.Models
+@inject ShowMeTheBet.ViewModels.Game.RouletteViewModel ViewModel
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+@implements IDisposable
+
+<PageTitle>룰렛 게임 - ShowMeTheBet</PageTitle>
+
+@if (ViewModel.IsLoading)
+{
+    <div class="loading-state">
+        <p>로딩 중...</p>
+    </div>
+}
+else if (!ViewModel.IsAuthenticated)
+{
+    <div class="auth-required">
+        <div class="auth-message">
+            <h2>로그인이 필요합니다</h2>
+            <p>룰렛을 플레이하려면 먼저 로그인해주세요.</p>
+            <button class="btn btn-primary" @onclick="NavigateToLogin">로그인하기</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="roulette-container">
+        <div class="roulette-header">
+            <h1>🎡 룰렛 게임</h1>
+            <div class="balance-display">
+                <span class="balance-label">잔액:</span>
+                <span class="balance-amount">@ViewModel.Balance.ToString("N0") 원</span>
+            </div>
+        </div>
+
+        <div class="roulette-content">
+            <div class="wheel-section">
+                <div class="wheel-wrapper">
+                    <div class="wheel @(ViewModel.IsSpinning ? "spinning" : string.Empty)" style="@($"transform: rotate({ViewModel.WheelRotation}deg);")">
+                        @for (int i = 0; i < WheelSegments.Length; i++)
+                        {
+                            var angle = i * 45;
+                            <div class="segment" style="@($"transform: rotate({angle}deg) skewY(-45deg);")">
+                                <span>@WheelSegments[i]</span>
+                            </div>
+                        }
+                    </div>
+                    <div class="wheel-pointer"></div>
+                </div>
+                <div class="result-panel">
+                    <p class="status-text">@ViewModel.StatusMessage</p>
+                    <div class="result-details">
+                        <div>
+                            <label>결과</label>
+                            <strong>@ViewModel.LastResultLabel</strong>
+                        </div>
+                        <div>
+                            <label>배수</label>
+                            <strong>@(ViewModel.LastMultiplier == 0 ? "-" : $"x{ViewModel.LastMultiplier:F1}")</strong>
+                        </div>
+                        <div>
+                            <label>획득</label>
+                            <strong>@(ViewModel.WinAmount > 0 ? ViewModel.WinAmount.ToString("N0") + " 원" : "-")</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <div class="bet-input">
+                    <label>베팅 금액</label>
+                    <input type="number"
+                           class="form-control"
+                           value="@ViewModel.BetAmount"
+                           min="1000"
+                           step="1000"
+                           @oninput="OnBetInput" />
+                    <div class="quick-buttons">
+                        <button class="btn btn-outline-secondary" @onclick="() => SetQuickBet(0.25m)" disabled="@ViewModel.IsSpinning">25%</button>
+                        <button class="btn btn-outline-secondary" @onclick="() => SetQuickBet(0.50m)" disabled="@ViewModel.IsSpinning">50%</button>
+                        <button class="btn btn-outline-secondary" @onclick="() => SetQuickBet(0.75m)" disabled="@ViewModel.IsSpinning">75%</button>
+                        <button class="btn btn-outline-secondary" @onclick="() => SetQuickBet(1.00m)" disabled="@ViewModel.IsSpinning">100%</button>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-spin" @onclick="Spin" disabled="@ViewModel.IsSpinning">
+                    @if (ViewModel.IsSpinning)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                    }
+                    스핀!
+                </button>
+
+                <div class="bet-history">
+                    <h3>룰렛 베팅 내역</h3>
+                    @if (ViewModel.Bets == null || ViewModel.Bets.Count == 0)
+                    {
+                        <p class="empty">베팅 내역이 없습니다.</p>
+                    }
+                    else
+                    {
+                        <div class="history-list">
+                            @foreach (var bet in ViewModel.Bets)
+                            {
+                                <div class="history-item @(bet.Status == GameBetStatus.Won ? "won" : "lost")">
+                                    <div>
+                                        <span class="history-label">@bet.BetChoice</span>
+                                        <small>@bet.BetTime.ToString("HH:mm:ss")</small>
+                                    </div>
+                                    <div class="history-amount">
+                                        <span>@bet.Amount.ToString("N0") 원</span>
+                                        <strong>@(bet.Status == GameBetStatus.Won ? $"+{bet.WinAmount.ToString("N0")} 원" : "-")</strong>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly string[] WheelSegments = new[]
+    {
+        "꽝", "x2", "꽝", "x3", "꽝", "x4", "꽝", "x5"
+    };
+
+    private void NavigateToLogin() => Navigation.NavigateTo("/login");
+
+    protected override async Task OnInitializedAsync()
+    {
+        ViewModel.StateChanged += OnStateChanged;
+        await ViewModel.InitializeAsync();
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    private Task SetQuickBet(decimal percent) => ViewModel.SetBetPercentageAsync(percent);
+
+    private Task Spin() => ViewModel.SpinAsync();
+
+    private Task OnBetInput(ChangeEventArgs e) => ViewModel.UpdateBetAmountFromInputAsync(e.Value?.ToString());
+
+    public void Dispose()
+    {
+        ViewModel.StateChanged -= OnStateChanged;
+        ViewModel.Dispose();
+    }
+}
+

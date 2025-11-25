@@ -107,7 +107,13 @@ public enum GameType
     /// 배수가 1.0에서 5.0까지 증가하는 게임입니다.
     /// 사용자가 STOP 버튼을 누르면 승리, 게임이 실패하면 패배입니다.
     /// </summary>
-    Graph
+    Graph,
+    
+    /// <summary>
+    /// 룰렛 게임
+    /// 8개의 슬롯(꽝 4개, 배수 4개) 중 하나를 랜덤으로 선택하여 배당을 결정합니다.
+    /// </summary>
+    Roulette
 }
 
 /// <summary>

@@ -38,10 +38,31 @@ else
                 <div class="round-info">
                     <h2>다음 라운드까지</h2>
                     <div class="countdown">@ViewModel.TimeLeft 초</div>
-                    <div class="current-result">
-                        <span class="result-label">현재 결과:</span>
-                        <span class="result-value @(ViewModel.CurrentResult == "홀" ? "odd" : "even")">@ViewModel.CurrentResult</span>
-                    </div>
+
+                    @if (ViewModel.IsRevealAnimation)
+                    {
+                        <div class="shuffle-overlay">
+                            <div class="shuffle-circle">
+                                <div class="cup cup-1"></div>
+                                <div class="cup cup-2"></div>
+                                <div class="cup cup-3"></div>
+                            </div>
+                            <div class="parity-hint">
+                                @for (var i = 0; i < ViewModel.AnimationCupCount; i++)
+                                {
+                                    <span class="parity-dot"></span>
+                                }
+                            </div>
+                            <p class="revealing-text">결과 확인 중...</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="current-result">
+                            <span class="result-label">현재 결과:</span>
+                            <span class="result-value @(ViewModel.CurrentResult == "홀" ? "odd" : "even")">@ViewModel.CurrentResult</span>
+                        </div>
+                    }
                 </div>
 
                 <div class="bet-section">

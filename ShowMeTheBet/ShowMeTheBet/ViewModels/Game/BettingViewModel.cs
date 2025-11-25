@@ -24,6 +24,7 @@ public class BettingViewModel : GamePageViewModel
     public void NavigateToSports() => Navigate("/sports");
     public void NavigateToOddEven() => Navigate("/oddeven");
     public void NavigateToGraph() => Navigate("/graph");
+    public void NavigateToRoulette() => Navigate("/roulette");
 
     private void Navigate(string uri)
     {
