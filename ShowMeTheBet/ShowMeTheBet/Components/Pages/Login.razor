@@ -1,40 +1,61 @@
 @page "/login"
-@using ShowMeTheBet.Services
-@using Microsoft.JSInterop
-@using System.Net.Http.Json
-@inject AuthService AuthService
-@inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
-@inject HttpClient HttpClient
+@inject ShowMeTheBet.Services.AuthPageService AuthPageService
 @rendermode InteractiveServer
 
-<PageTitle>로그인 - ShowMeTheBet</PageTitle>
+<PageTitle>로그인 - 도토리</PageTitle>
 
-<div class="login-container">
-    <div class="login-card">
-        <div class="login-header">
-            <h1>⚽ ShowMeTheBet</h1>
-            <p class="text-muted">스포츠 베팅에 오신 것을 환영합니다</p>
+<div class="auth-page">
+    <div class="auth-card">
+        <div class="auth-visual">
+            <div>
+                <h1>도토리에 오신 것을 환영합니다</h1>
+                <p>맞춤형 게임과 실시간 배당으로 새로운 도토리 모으기를 시작하세요.</p>
+                <ul>
+                    <li>실시간 그래프 × 홀짝 게임</li>
+                    <li>스포츠 경기 라이브 도토리</li>
+                    <li>효율적인 자산 관리</li>
+                    <li>* 본 페이지는 건강한 베팅 놀이터 입니다.</li>
+                </ul>
+            </div>
         </div>
 
-        @if (!string.IsNullOrEmpty(errorMessage))
-        {
-            <div class="alert alert-danger" role="alert">
-                @errorMessage
+        <div class="auth-form">
+            <div class="auth-header">
+                <h2>로그인</h2>
+                <p class="text-muted">계정 정보를 입력해 주십시오.</p>
             </div>
-        }
 
-        <form method="post" action="/api/auth/login" id="loginForm">
-            <div class="login-form">
-                <h3>로그인</h3>
-                <div class="mb-3">
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger" role="alert">
+                    @errorMessage
+                </div>
+            }
+
+            <form method="post" action="/api/auth/login" id="loginForm">
+                <div class="form-group">
                     <label for="username" class="form-label">사용자명</label>
-                    <input type="text" class="form-control" id="username" name="username" @bind="username" placeholder="사용자명을 입력하세요" required />
+                    <input type="text"
+                           class="form-control"
+                           id="username"
+                           name="username"
+                           @bind="username"
+                           placeholder="사용자명을 입력하세요"
+                           required />
                 </div>
-                <div class="mb-3">
+
+                <div class="form-group">
                     <label for="password" class="form-label">비밀번호</label>
-                    <input type="password" class="form-control" id="password" name="password" @bind="password" @onkeypress="HandleKeyPress" placeholder="비밀번호를 입력하세요" required />
+                    <input type="password"
+                           class="form-control"
+                           id="password"
+                           name="password"
+                           @bind="password"
+                           @onkeypress="HandleKeyPress"
+                           placeholder="비밀번호를 입력하세요"
+                           required />
                 </div>
+
                 <button type="button" class="btn btn-primary w-100 mb-3" @onclick="HandleLogin" disabled="@isLoading">
                     @if (isLoading)
                     {
@@ -42,11 +63,12 @@
                     }
                     로그인
                 </button>
+
                 <div class="text-center">
                     <p class="mb-0">계정이 없으신가요? <a href="/register">회원가입</a></p>
                 </div>
-            </div>
-        </form>
+            </form>
+        </div>
     </div>
 </div>
 
@@ -58,95 +80,24 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // CurrentUser를 확인 (쿠키에서 자동으로 로드됨)
-        // 세션 로드는 필요 없음 (CurrentUser getter에서 쿠키 확인)
-        var user = AuthService.CurrentUser;
-        
-        if (user != null)
-        {
-            // 이미 로그인되어 있으면 게임 페이지로 이동
-            Navigation.NavigateTo("/game", forceLoad: true);
-        }
+        await AuthPageService.RedirectIfAuthenticatedAsync();
     }
 
     private async Task HandleLogin()
     {
         errorMessage = string.Empty;
         
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
-        {
-            errorMessage = "사용자명과 비밀번호를 입력해주세요.";
-            return;
-        }
-
         isLoading = true;
         StateHasChanged();
         
-        try
+        var result = await AuthPageService.LoginAsync(username, password);
+        isLoading = false;
+
+        if (!result.Success)
         {
-            // JavaScript fetch를 사용하여 API 호출 (쿠키 자동 포함)
-            var loginData = new { Username = username, Password = password };
-            var json = System.Text.Json.JsonSerializer.Serialize(loginData);
-            
-            await JSRuntime.InvokeVoidAsync("eval", $@"
-                (async function() {{
-                    try {{
-                        const response = await fetch('/api/auth/login', {{
-                            method: 'POST',
-                            headers: {{
-                                'Content-Type': 'application/json',
-                            }},
-                            credentials: 'include',
-                            body: JSON.stringify({json})
-                        }});
-                        
-                        const data = await response.json();
-                        console.log('로그인 응답:', data);
-                        if (data.success) {{
-                            console.log('로그인 성공, 세션/쿠키 저장 대기 중...');
-                            // 세션/쿠키 저장을 위해 약간의 지연 후 페이지 이동
-                            await new Promise(resolve => setTimeout(resolve, 500));
-                            console.log('페이지 이동 시작: /game');
-                            // 페이지를 완전히 리로드하여 세션/쿠키를 포함한 새 요청 보내기
-                            window.location.href = '/game';
-                        }} else {{
-                            console.log('로그인 실패:', data.message);
-                            // 에러는 서버에서 처리하므로 페이지 리로드
-                            window.location.reload();
-                        }}
-                    }} catch (error) {{
-                        console.error('로그인 오류:', error);
-                        window.location.reload();
-                    }}
-                }})();
-            ");
-            
-            // JavaScript가 실행되므로 여기서 종료
-            return;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = "로그인 중 오류가 발생했습니다: " + ex.Message;
-        }
-        finally
-        {
-            isLoading = false;
-            StateHasChanged();
+            errorMessage = result.ErrorMessage ?? "로그인 중 오류가 발생했습니다.";
         }
     }
-
-    private class LoginResponse
-    {
-        public bool Success { get; set; }
-        public string? RedirectUrl { get; set; }
-    }
-
-    private class LoginErrorResponse
-    {
-        public bool Success { get; set; }
-        public string? Message { get; set; }
-    }
-
 
     private async Task HandleKeyPress(KeyboardEventArgs e)
     {

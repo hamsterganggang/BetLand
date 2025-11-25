@@ -1,22 +1,19 @@
 @page "/sports"
-@using ShowMeTheBet.Models
-@using ShowMeTheBet.Services
-@using Microsoft.JSInterop
-@inject BettingService BettingService
-@inject AuthService AuthService
+@inject ShowMeTheBet.ViewModels.Game.SportsViewModel ViewModel
 @inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
-@rendermode InteractiveServer
+@implements IDisposable
 
 <PageTitle>스포츠 토토 - ShowMeTheBet</PageTitle>
 
-@if (isLoading)
+@* 로딩 중일 때 표시되는 화면 *@
+@if (ViewModel.IsLoading)
 {
     <div style="text-align: center; padding: 50px;">
         <p>로딩 중...</p>
     </div>
 }
-else if (!isAuthenticated)
+@* 인증되지 않은 경우 로그인 요청 화면 *@
+else if (!ViewModel.IsAuthenticated)
 {
     <div class="auth-required">
         <div class="auth-message">
@@ -26,6 +23,7 @@ else if (!isAuthenticated)
         </div>
     </div>
 }
+@* 인증된 경우 스포츠 토토 화면 *@
 else
 {
     <div class="betting-container">
@@ -33,17 +31,18 @@ else
             <h1>⚽ 스포츠 토토</h1>
             <div class="balance-display">
                 <span class="balance-label">잔액:</span>
-                <span class="balance-amount">@balance.ToString("N0") 원</span>
+                <span class="balance-amount">@ViewModel.Balance.ToString("N0") 원</span>
             </div>
         </div>
 
         <div class="betting-content">
+            @* 경기 목록 섹션 *@
             <div class="matches-section">
                 <h2>경기 목록</h2>
                 <div class="matches-list">
-                    @if (matches != null)
+                    @if (ViewModel.Matches != null)
                     {
-                        @foreach (var match in matches)
+                        @foreach (var match in ViewModel.Matches)
                         {
                             <div class="match-card">
                                 <div class="match-header">
@@ -51,24 +50,27 @@ else
                                     <span class="match-time">@match.MatchTime.ToString("MM/dd HH:mm")</span>
                                 </div>
                                 <div class="match-teams">
+                                    @* 홈팀 베팅 버튼 *@
                                     <div class="team-section">
                                         <div class="team-name">@match.HomeTeam</div>
-                                        <button class="odds-btn @(selectedBets.Any(b => b.MatchId == match.Id && b.Type == BetType.Home) ? "selected" : "")"
-                                                @onclick="() => SelectBet(match.Id, BetType.Home, match.HomeOdds, match.HomeTeam, match.AwayTeam)">
+                                        <button class="odds-btn @(ViewModel.SelectedBets.Any(b => b.MatchId == match.Id && b.Type == BetType.Home) ? "selected" : "")"
+                                                @onclick="() => ViewModel.SelectBet(match.Id, BetType.Home, match.HomeOdds, match.HomeTeam, match.AwayTeam)">
                                             <span class="odds-value">@match.HomeOdds.ToString("F2")</span>
                                         </button>
                                     </div>
+                                    @* 무승부 베팅 버튼 *@
                                     <div class="team-section">
                                         <div class="team-name draw">무승부</div>
-                                        <button class="odds-btn @(selectedBets.Any(b => b.MatchId == match.Id && b.Type == BetType.Draw) ? "selected" : "")"
-                                                @onclick="() => SelectBet(match.Id, BetType.Draw, match.DrawOdds, match.HomeTeam, match.AwayTeam)">
+                                        <button class="odds-btn @(ViewModel.SelectedBets.Any(b => b.MatchId == match.Id && b.Type == BetType.Draw) ? "selected" : "")"
+                                                @onclick="() => ViewModel.SelectBet(match.Id, BetType.Draw, match.DrawOdds, match.HomeTeam, match.AwayTeam)">
                                             <span class="odds-value">@match.DrawOdds.ToString("F2")</span>
                                         </button>
                                     </div>
+                                    @* 원정팀 베팅 버튼 *@
                                     <div class="team-section">
                                         <div class="team-name">@match.AwayTeam</div>
-                                        <button class="odds-btn @(selectedBets.Any(b => b.MatchId == match.Id && b.Type == BetType.Away) ? "selected" : "")"
-                                                @onclick="() => SelectBet(match.Id, BetType.Away, match.AwayOdds, match.HomeTeam, match.AwayTeam)">
+                                        <button class="odds-btn @(ViewModel.SelectedBets.Any(b => b.MatchId == match.Id && b.Type == BetType.Away) ? "selected" : "")"
+                                                @onclick="() => ViewModel.SelectBet(match.Id, BetType.Away, match.AwayOdds, match.HomeTeam, match.AwayTeam)">
                                             <span class="odds-value">@match.AwayOdds.ToString("F2")</span>
                                         </button>
                                     </div>
@@ -79,169 +81,34 @@ else
                 </div>
             </div>
 
+            @* 베팅 슬립 섹션 *@
             <div class="betslip-section">
-                <BetSlip Bets="@selectedBets" OnRemove="@RemoveBet" OnPlaceBets="@PlaceBets" />
+                <BetSlip Bets="@ViewModel.SelectedBets" OnRemove="ViewModel.RemoveBet" OnPlaceBets="ViewModel.PlaceBetsAsync" />
             </div>
         </div>
     </div>
 }
 
 @code {
-    private List<BetSlip.BetSlipItem> selectedBets = new();
-    private List<Match>? matches;
-    private decimal balance = 0;
-    private bool isAuthenticated = false;
-    private bool isLoading = true;
-
-    protected override async Task OnInitializedAsync()
-    {
-        isLoading = true;
-        StateHasChanged();
-        
-        // 실서버(IIS)에서 SignalR 연결의 HttpContext 접근 문제를 해결하기 위해
-        // JavaScript Interop을 통해 API를 호출하여 인증 상태 확인
-        try
-        {
-            var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-            if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
-            {
-                // API 응답을 기반으로 사용자 정보 로드
-                await AuthService.LoadUserByIdAsync(authResult.userId.Value);
-                isAuthenticated = true;
-                // API 응답의 balance를 사용하거나, RefreshUserAsync 후 GetBalanceAsync 호출
-                if (authResult.balance.HasValue)
-                {
-                    balance = authResult.balance.Value;
-                }
-                else
-                {
-                    await AuthService.RefreshUserAsync();
-                    balance = await BettingService.GetBalanceAsync();
-                }
-                matches = await BettingService.GetMatchesAsync();
-            }
-            else
-            {
-                // API 호출 실패 시 직접 확인 (로컬 환경 대비)
-                AuthService.ResetUserLoad();
-                await AuthService.LoadUserFromSessionAsync();
-                var user = AuthService.CurrentUser;
-                isAuthenticated = user != null;
-                
-                if (isAuthenticated)
-                {
-                    await AuthService.RefreshUserAsync();
-                    balance = await BettingService.GetBalanceAsync();
-                    matches = await BettingService.GetMatchesAsync();
-                }
-            }
-        }
-        catch
-        {
-            // API 호출 실패 시 직접 확인
-            AuthService.ResetUserLoad();
-            await AuthService.LoadUserFromSessionAsync();
-            var user = AuthService.CurrentUser;
-            isAuthenticated = user != null;
-            
-            if (isAuthenticated)
-            {
-                await AuthService.RefreshUserAsync();
-                balance = await BettingService.GetBalanceAsync();
-                matches = await BettingService.GetMatchesAsync();
-            }
-        }
-        
-        isLoading = false;
-        StateHasChanged();
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender && !isAuthenticated)
-        {
-            // 첫 렌더링 후에도 인증 상태를 다시 확인 (SignalR 연결 후 HttpContext가 설정될 수 있음)
-            await CheckAuthAndLoadData();
-        }
-    }
-
-    private async Task CheckAuthAndLoadData()
-    {
-        try
-        {
-            var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-            if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
-            {
-                var wasAuthenticated = isAuthenticated;
-                await AuthService.LoadUserByIdAsync(authResult.userId.Value);
-                isAuthenticated = true;
-                
-                if (!wasAuthenticated)
-                {
-                    await AuthService.RefreshUserAsync();
-                    balance = await BettingService.GetBalanceAsync();
-                    matches = await BettingService.GetMatchesAsync();
-                    StateHasChanged();
-                }
-            }
-        }
-        catch { }
-    }
-
-    private class AuthCheckResult
-    {
-        public bool success { get; set; }
-        public bool authenticated { get; set; }
-        public int? userId { get; set; }
-        public string? username { get; set; }
-        public decimal? balance { get; set; }
-    }
-
-    private void SelectBet(int matchId, BetType type, decimal odds, string homeTeam, string awayTeam)
-    {
-        var existing = selectedBets.FirstOrDefault(b => b.MatchId == matchId);
-        if (existing != null)
-        {
-            selectedBets.Remove(existing);
-        }
-        
-        selectedBets.Add(new BetSlip.BetSlipItem
-        {
-            MatchId = matchId,
-            MatchInfo = $"{homeTeam} vs {awayTeam}",
-            Type = type,
-            Odds = odds,
-            Amount = 0
-        });
-        StateHasChanged();
-    }
-
-    private void RemoveBet(int matchId)
-    {
-        selectedBets.RemoveAll(b => b.MatchId == matchId);
-        StateHasChanged();
-    }
-
-    private async Task PlaceBets()
-    {
-        // 베팅 전에 사용자 정보 다시 로드
-        if (AuthService.CurrentUser == null)
-        {
-            await AuthService.LoadUserFromSessionAsync();
-        }
-        
-        foreach (var bet in selectedBets.Where(b => b.Amount > 0))
-        {
-            await BettingService.PlaceBetAsync(bet.MatchId, bet.Type, bet.Amount);
-        }
-        selectedBets.Clear();
-        balance = await BettingService.GetBalanceAsync();
-        StateHasChanged();
-    }
-
     private void NavigateToLogin()
     {
         Navigation.NavigateTo("/login");
     }
-}
 
+    protected override async Task OnInitializedAsync()
+    {
+        ViewModel.StateChanged += OnViewModelStateChanged;
+        await ViewModel.InitializeAsync();
+    }
+
+    private void OnViewModelStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ViewModel.StateChanged -= OnViewModelStateChanged;
+        ViewModel.Dispose();
+    }
+}

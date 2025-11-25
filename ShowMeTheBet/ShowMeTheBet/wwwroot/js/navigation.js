@@ -24,6 +24,38 @@ window.forceNavigate = function(url) {
     window.location.replace(url);
 };
 
+window.loginWithCredentials = async function(payloadJson) {
+    try {
+        const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include',
+            body: payloadJson
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            // 세션/쿠키 동기화를 위해 약간 대기 후 페이지 이동
+            await new Promise(resolve => setTimeout(resolve, 500));
+            window.location.href = data.redirectUrl || '/game';
+            return { success: true };
+        }
+
+        return {
+            success: false,
+            message: data.message || '로그인에 실패했습니다.'
+        };
+    } catch (error) {
+        console.error('로그인 오류:', error);
+        return {
+            success: false,
+            message: error?.message || '로그인 중 오류가 발생했습니다.'
+        };
+    }
+};
+
 window.logout = async function() {
     console.log('logout 함수 호출됨');
     try {

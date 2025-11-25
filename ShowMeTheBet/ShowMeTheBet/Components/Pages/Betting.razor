@@ -1,24 +1,20 @@
 @page "/game"
-@using ShowMeTheBet.Models
-@using ShowMeTheBet.Services
-@using Microsoft.AspNetCore.Http
-@using Microsoft.JSInterop
-@inject BettingService BettingService
-@inject AuthService AuthService
+@inject ShowMeTheBet.ViewModels.Game.BettingViewModel ViewModel
 @inject NavigationManager Navigation
-@inject IHttpContextAccessor HttpContextAccessor
-@inject IJSRuntime JSRuntime
+@implements IDisposable
 @rendermode InteractiveServer
 
 <PageTitle>ShowMeTheBet</PageTitle>
 
-@if (isLoading)
+@* 로딩 중일 때 표시되는 화면 *@
+@if (ViewModel.IsLoading)
 {
     <div style="text-align: center; padding: 50px;">
         <p>로딩 중...</p>
     </div>
 }
-else if (!isAuthenticated)
+@* 인증되지 않은 경우 로그인 요청 화면 *@
+else if (!ViewModel.IsAuthenticated)
 {
     <div class="auth-required">
         <div class="auth-message">
@@ -28,6 +24,7 @@ else if (!isAuthenticated)
         </div>
     </div>
 }
+@* 인증된 경우 게임 선택 화면 *@
 else
 {
     <div class="main-container">
@@ -35,28 +32,31 @@ else
             <h1>⚽ ShowMeTheBet</h1>
             <div class="balance-display">
                 <span class="balance-label">잔액:</span>
-                <span class="balance-amount">@balance.ToString("N0") 원</span>
+                    <span class="balance-amount">@ViewModel.Balance.ToString("N0") 원</span>
             </div>
         </div>
 
         <div class="games-menu">
             <h2>게임 선택</h2>
             <div class="games-grid">
-                <div class="game-card" @onclick="NavigateToSports">
+                @* 스포츠 토토 게임 카드 *@
+                <div class="game-card" @onclick="ViewModel.NavigateToSports" role="button" tabindex="0" style="cursor: pointer;">
                     <div class="game-icon">⚽</div>
                     <h3>스포츠 토토</h3>
                     <p>실시간 경기 베팅</p>
                     <div class="game-badge">스포츠</div>
                 </div>
 
-                <div class="game-card" @onclick="NavigateToOddEven">
+                @* 홀짝 게임 카드 *@
+                <div class="game-card" @onclick="ViewModel.NavigateToOddEven" role="button" tabindex="0" style="cursor: pointer;">
                     <div class="game-icon">🎲</div>
                     <h3>홀짝</h3>
                     <p>30초마다 결과 발표</p>
                     <div class="game-badge">x2.0</div>
                 </div>
 
-                <div class="game-card" @onclick="NavigateToGraph">
+                @* 그래프 게임 카드 *@
+                <div class="game-card" @onclick="ViewModel.NavigateToGraph" role="button" tabindex="0" style="cursor: pointer;">
                     <div class="game-icon">📈</div>
                     <h3>그래프</h3>
                     <p>배수 게임 (x1 ~ x5)</p>
@@ -68,186 +68,25 @@ else
 }
 
 @code {
-    private decimal balance = 0;
-    private bool isAuthenticated = false;
-    private bool isLoading = true;
-
-    protected override async Task OnInitializedAsync()
-    {
-        isLoading = true;
-        StateHasChanged();
-        
-        // 실서버(IIS)에서 SignalR 연결의 HttpContext 접근 문제를 해결하기 위해
-        // JavaScript Interop을 통해 API를 호출하여 인증 상태 확인
-        try
-        {
-            var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-            if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
-            {
-                // API 응답을 기반으로 사용자 정보 로드
-                await AuthService.LoadUserByIdAsync(authResult.userId.Value);
-                isAuthenticated = true;
-                // API 응답의 balance를 사용하거나, RefreshUserAsync 후 GetBalanceAsync 호출
-                if (authResult.balance.HasValue)
-                {
-                    balance = authResult.balance.Value;
-                }
-                else
-                {
-                    await AuthService.RefreshUserAsync();
-                    balance = await BettingService.GetBalanceAsync();
-                }
-            }
-            else
-            {
-                // API 호출 실패 시 직접 확인 (로컬 환경 대비)
-                AuthService.ResetUserLoad();
-                await AuthService.LoadUserFromSessionAsync();
-                var user = AuthService.CurrentUser;
-                isAuthenticated = user != null;
-                
-                if (isAuthenticated)
-                {
-                    await AuthService.RefreshUserAsync();
-                    balance = await BettingService.GetBalanceAsync();
-                }
-            }
-        }
-        catch
-        {
-            // API 호출 실패 시 직접 확인
-            AuthService.ResetUserLoad();
-            await AuthService.LoadUserFromSessionAsync();
-            var user = AuthService.CurrentUser;
-            isAuthenticated = user != null;
-            
-            if (isAuthenticated)
-            {
-                await AuthService.RefreshUserAsync();
-                balance = await BettingService.GetBalanceAsync();
-            }
-        }
-        
-        isLoading = false;
-        StateHasChanged();
-    }
-
-    protected override async Task OnParametersSetAsync()
-    {
-        // 파라미터 변경 시 잔액이 0이면 재로드
-        if (isAuthenticated && balance == 0)
-        {
-            await AuthService.RefreshUserAsync();
-            balance = await BettingService.GetBalanceAsync();
-            StateHasChanged();
-        }
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender && !isAuthenticated)
-        {
-            // 첫 렌더링 후에도 인증 상태를 다시 확인 (SignalR 연결 후 HttpContext가 설정될 수 있음)
-            await CheckAuthAndLoadData();
-        }
-        else if (firstRender && isAuthenticated && balance == 0)
-        {
-            // 인증되었지만 잔액이 0이면 재로드
-            await AuthService.RefreshUserAsync();
-            balance = await BettingService.GetBalanceAsync();
-            StateHasChanged();
-        }
-    }
-
-    private async Task CheckAuthAndLoadData()
-    {
-        try
-        {
-            var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-            if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
-            {
-                var wasAuthenticated = isAuthenticated;
-                await AuthService.LoadUserByIdAsync(authResult.userId.Value);
-                isAuthenticated = true;
-                
-                if (!wasAuthenticated || balance == 0)
-                {
-                    await AuthService.RefreshUserAsync();
-                    balance = await BettingService.GetBalanceAsync();
-                }
-                
-                if (wasAuthenticated != isAuthenticated)
-                {
-                    StateHasChanged();
-                }
-            }
-            else
-            {
-                // API 호출 실패 시 직접 확인
-                AuthService.ResetUserLoad();
-                await AuthService.LoadUserFromSessionAsync();
-                var user = AuthService.CurrentUser;
-                var wasAuthenticated = isAuthenticated;
-                isAuthenticated = user != null;
-                
-                if (isAuthenticated && (!wasAuthenticated || balance == 0))
-                {
-                    balance = await BettingService.GetBalanceAsync();
-                }
-                
-                if (wasAuthenticated != isAuthenticated)
-                {
-                    StateHasChanged();
-                }
-            }
-        }
-        catch
-        {
-            // API 호출 실패 시 직접 확인
-            AuthService.ResetUserLoad();
-            await AuthService.LoadUserFromSessionAsync();
-            var user = AuthService.CurrentUser;
-            var wasAuthenticated = isAuthenticated;
-            isAuthenticated = user != null;
-            
-            if (isAuthenticated && (!wasAuthenticated || balance == 0))
-            {
-                balance = await BettingService.GetBalanceAsync();
-            }
-            
-            if (wasAuthenticated != isAuthenticated)
-            {
-                StateHasChanged();
-            }
-        }
-    }
-
-    private class AuthCheckResult
-    {
-        public bool success { get; set; }
-        public bool authenticated { get; set; }
-        public int? userId { get; set; }
-        public string? username { get; set; }
-        public decimal? balance { get; set; }
-    }
-
     private void NavigateToLogin()
     {
         Navigation.NavigateTo("/login");
     }
 
-    private void NavigateToSports()
+    protected override async Task OnInitializedAsync()
     {
-        Navigation.NavigateTo("/sports");
+        ViewModel.StateChanged += OnViewModelStateChanged;
+        await ViewModel.InitializeAsync();
     }
 
-    private void NavigateToOddEven()
+    private void OnViewModelStateChanged()
     {
-        Navigation.NavigateTo("/oddeven");
+        InvokeAsync(StateHasChanged);
     }
 
-    private void NavigateToGraph()
+    public void Dispose()
     {
-        Navigation.NavigateTo("/graph");
+        ViewModel.StateChanged -= OnViewModelStateChanged;
+        ViewModel.Dispose();
     }
 }

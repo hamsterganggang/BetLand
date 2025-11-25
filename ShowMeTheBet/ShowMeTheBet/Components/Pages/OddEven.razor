@@ -1,23 +1,18 @@
 @page "/oddeven"
-@using ShowMeTheBet.Models
-@using ShowMeTheBet.Services
-@using Microsoft.JSInterop
-@inject GameService GameService
-@inject AuthService AuthService
+@inject ShowMeTheBet.ViewModels.Game.OddEvenViewModel ViewModel
 @inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
 @rendermode InteractiveServer
-@implements IAsyncDisposable
+@implements IDisposable
 
 <PageTitle>홀짝 게임 - ShowMeTheBet</PageTitle>
 
-@if (isLoading)
+@if (ViewModel.IsLoading)
 {
     <div style="text-align: center; padding: 50px;">
         <p>로딩 중...</p>
     </div>
 }
-else if (!isAuthenticated)
+else if (!ViewModel.IsAuthenticated)
 {
     <div class="auth-required">
         <div class="auth-message">
@@ -34,7 +29,7 @@ else
             <h1>🎲 홀짝 게임</h1>
             <div class="balance-display">
                 <span class="balance-label">잔액:</span>
-                <span class="balance-amount">@balance.ToString("N0") 원</span>
+                <span class="balance-amount">@ViewModel.Balance.ToString("N0") 원</span>
             </div>
         </div>
 
@@ -42,10 +37,10 @@ else
             <div class="game-main">
                 <div class="round-info">
                     <h2>다음 라운드까지</h2>
-                    <div class="countdown">@timeLeft 초</div>
+                    <div class="countdown">@ViewModel.TimeLeft 초</div>
                     <div class="current-result">
                         <span class="result-label">현재 결과:</span>
-                        <span class="result-value @(currentResult == "홀" ? "odd" : "even")">@currentResult</span>
+                        <span class="result-value @(ViewModel.CurrentResult == "홀" ? "odd" : "even")">@ViewModel.CurrentResult</span>
                     </div>
                 </div>
 
@@ -53,52 +48,52 @@ else
                     <h3>베팅하기</h3>
                     <div class="bet-amount-input">
                         <label>베팅 금액:</label>
-                        <input type="number" 
-                               class="form-control" 
-                               value="@betAmount" 
+                        <input type="number"
+                               class="form-control"
+                               value="@ViewModel.BetAmount"
                                @oninput="OnBetAmountInput"
-                               min="1000" 
+                               min="1000"
                                step="1000"
                                placeholder="금액 입력" />
                         <div class="quick-amount-buttons">
-                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetBetAmount(0.25m)" disabled="@(balance <= 0 || timeLeft < 5 || isLoading)">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="async () => await OnQuickBet(0.25m)" disabled="@(ViewModel.Balance <= 0 || ViewModel.TimeLeft < 5 || ViewModel.IsLoading)">
                                 25%
                             </button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetBetAmount(0.50m)" disabled="@(balance <= 0 || timeLeft < 5 || isLoading)">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="async () => await OnQuickBet(0.50m)" disabled="@(ViewModel.Balance <= 0 || ViewModel.TimeLeft < 5 || ViewModel.IsLoading)">
                                 50%
                             </button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetBetAmount(0.75m)" disabled="@(balance <= 0 || timeLeft < 5 || isLoading)">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="async () => await OnQuickBet(0.75m)" disabled="@(ViewModel.Balance <= 0 || ViewModel.TimeLeft < 5 || ViewModel.IsLoading)">
                                 75%
                             </button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetBetAmount(1.00m)" disabled="@(balance <= 0 || timeLeft < 5 || isLoading)">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="async () => await OnQuickBet(1.00m)" disabled="@(ViewModel.Balance <= 0 || ViewModel.TimeLeft < 5 || ViewModel.IsLoading)">
                                 100%
                             </button>
                         </div>
                     </div>
                     <div class="bet-buttons">
-                        <button class="btn btn-odd @(selectedChoice == "홀" ? "selected" : "")" 
-                                @onclick="SelectOdd"
-                                disabled="@(timeLeft < 5 || isLoading)">
+                        <button class="btn btn-odd @(ViewModel.SelectedChoice == "홀" ? "selected" : "")"
+                                @onclick="ViewModel.SelectOdd"
+                                disabled="@(ViewModel.TimeLeft < 5 || ViewModel.IsLoading || ViewModel.IsPlacingBet)">
                             홀 (x2.0)
                         </button>
-                        <button class="btn btn-even @(selectedChoice == "짝" ? "selected" : "")" 
-                                @onclick="SelectEven"
-                                disabled="@(timeLeft < 5 || isLoading)">
+                        <button class="btn btn-even @(ViewModel.SelectedChoice == "짝" ? "selected" : "")"
+                                @onclick="ViewModel.SelectEven"
+                                disabled="@(ViewModel.TimeLeft < 5 || ViewModel.IsLoading || ViewModel.IsPlacingBet)">
                             짝 (x2.0)
                         </button>
                     </div>
-                    @if (selectedChoice != "" && betAmount > 0)
+                    @if (!string.IsNullOrEmpty(ViewModel.SelectedChoice) && ViewModel.BetAmount > 0)
                     {
                         <div class="bet-summary">
-                            <p>선택: <strong>@selectedChoice</strong></p>
-                            <p>베팅 금액: <strong>@betAmount.ToString("N0") 원</strong></p>
-                            <p>예상 당첨금: <strong>@((betAmount * 2).ToString("N0")) 원</strong></p>
+                            <p>선택: <strong>@ViewModel.SelectedChoice</strong></p>
+                            <p>베팅 금액: <strong>@ViewModel.BetAmount.ToString("N0") 원</strong></p>
+                            <p>예상 당첨금: <strong>@((ViewModel.BetAmount * 2).ToString("N0")) 원</strong></p>
                         </div>
                     }
-                    <button class="btn btn-primary btn-bet" 
+                    <button class="btn btn-primary btn-bet"
                             @onclick="PlaceBet"
-                            disabled="@IsBetDisabled()">
-                        @if (isLoading)
+                            disabled="@ViewModel.IsBetDisabled">
+                        @if (ViewModel.IsPlacingBet)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
                         }
@@ -109,7 +104,7 @@ else
 
             <div class="game-history">
                 <h3>베팅 내역</h3>
-                @if (bets == null || bets.Count == 0)
+                @if (ViewModel.Bets == null || ViewModel.Bets.Count == 0)
                 {
                     <div class="empty-history">
                         <p>베팅 내역이 없습니다.</p>
@@ -118,7 +113,7 @@ else
                 else
                 {
                     <div class="bets-list">
-                        @foreach (var bet in bets)
+                        @foreach (var bet in ViewModel.Bets)
                         {
                             <div class="bet-item @bet.Status.ToString().ToLower()">
                                 <div class="bet-info">
@@ -151,540 +146,24 @@ else
 }
 
 @code {
-    private decimal balance = 0;
-    private int timeLeft = 30;
-    private string currentResult = "홀";
-    private string selectedChoice = "";
-    private decimal betAmount = 0;
-    private bool isLoading = true;
-    private bool isAuthenticated = false;
-    private List<GameBet>? bets;
-    private System.Threading.Timer? timer;
-    private DateTime lastRoundTime = DateTime.MinValue;
+    private void NavigateToLogin() => Navigation.NavigateTo("/login");
 
     protected override async Task OnInitializedAsync()
     {
-        isLoading = true;
-        StateHasChanged();
-        
-        try
-        {
-            // 실서버(IIS)에서 SignalR 연결의 HttpContext 접근 문제를 해결하기 위해
-            // JavaScript Interop을 통해 API를 호출하여 인증 상태 확인
-            try
-            {
-                var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-                if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
-                {
-                    // API 응답을 기반으로 사용자 정보 로드
-                    await AuthService.LoadUserByIdAsync(authResult.userId.Value);
-                    isAuthenticated = true;
-                    // API 응답의 balance를 사용하거나, RefreshUserAsync 후 LoadData 호출
-                    if (authResult.balance.HasValue)
-                    {
-                        balance = authResult.balance.Value;
-                    }
-                    else
-                    {
-                        await AuthService.RefreshUserAsync();
-                        balance = await GameService.GetBalanceAsync();
-                    }
-                    // 나머지 데이터 로드
-                    timeLeft = await GameService.GetTimeUntilNextRoundAsync();
-                    currentResult = await GameService.GetCurrentOddEvenResultAsync();
-                    bets = await GameService.GetOddEvenBetsAsync(authResult.userId.Value);
-                    lastRoundTime = DateTime.Now;
-                    InitializeTimer();
-                    StartTimer();
-                }
-                else
-                {
-                    // API 호출 실패 시 직접 확인 (로컬 환경 대비)
-                    AuthService.ResetUserLoad();
-                    await AuthService.LoadUserFromSessionAsync();
-                    var user = AuthService.CurrentUser;
-                    isAuthenticated = user != null;
-                    
-                    if (isAuthenticated)
-                    {
-                        await AuthService.RefreshUserAsync();
-                        balance = await GameService.GetBalanceAsync();
-                        timeLeft = await GameService.GetTimeUntilNextRoundAsync();
-                        currentResult = await GameService.GetCurrentOddEvenResultAsync();
-                        // userId 가져오기
-                        int? userId = null;
-                        if (AuthService.CurrentUser != null)
-                        {
-                            userId = AuthService.CurrentUser.Id;
-                        }
-                        else
-                        {
-                            try
-                            {
-                                var authResult2 = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-                                if (authResult2 != null && authResult2.authenticated && authResult2.userId.HasValue)
-                                {
-                                    userId = authResult2.userId.Value;
-                                }
-                            }
-                            catch { }
-                        }
-                        bets = await GameService.GetOddEvenBetsAsync(userId);
-                        lastRoundTime = DateTime.Now;
-                        InitializeTimer();
-                        StartTimer();
-                    }
-                }
-            }
-            catch
-            {
-                // API 호출 실패 시 직접 확인
-                AuthService.ResetUserLoad();
-                await AuthService.LoadUserFromSessionAsync();
-                var user = AuthService.CurrentUser;
-                isAuthenticated = user != null;
-                
-                if (isAuthenticated)
-                {
-                    await AuthService.RefreshUserAsync();
-                    balance = await GameService.GetBalanceAsync();
-                    timeLeft = await GameService.GetTimeUntilNextRoundAsync();
-                    currentResult = await GameService.GetCurrentOddEvenResultAsync();
-                    // userId 가져오기
-                    int? userId2 = null;
-                    if (AuthService.CurrentUser != null)
-                    {
-                        userId2 = AuthService.CurrentUser.Id;
-                    }
-                    else
-                    {
-                        try
-                        {
-                            var authResult3 = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-                            if (authResult3 != null && authResult3.authenticated && authResult3.userId.HasValue)
-                            {
-                                userId2 = authResult3.userId.Value;
-                            }
-                        }
-                        catch { }
-                    }
-                    bets = await GameService.GetOddEvenBetsAsync(userId2);
-                    lastRoundTime = DateTime.Now;
-                    InitializeTimer();
-                    StartTimer();
-                }
-            }
-        }
-        finally
-        {
-            isLoading = false;
-            StateHasChanged();
-        }
+        ViewModel.StateChanged += OnViewModelStateChanged;
+        await ViewModel.InitializeAsync();
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    private Task OnQuickBet(decimal percentage) => ViewModel.SetBetAmountPercentageAsync(percentage);
+    private Task OnBetAmountInput(ChangeEventArgs e) => ViewModel.UpdateBetAmountFromInputAsync(e.Value?.ToString());
+    private Task PlaceBet() => ViewModel.PlaceBetAsync();
+
+    private void OnViewModelStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
     {
-        if (firstRender && !isAuthenticated)
-        {
-            // 첫 렌더링 후에도 인증 상태를 다시 확인 (SignalR 연결 후 HttpContext가 설정될 수 있음)
-            await CheckAuthAndLoadData();
-        }
-    }
-
-    private async Task CheckAuthAndLoadData()
-    {
-        try
-        {
-            var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-            if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
-            {
-                var wasAuthenticated = isAuthenticated;
-                await AuthService.LoadUserByIdAsync(authResult.userId.Value);
-                isAuthenticated = true;
-                
-                if (!wasAuthenticated)
-                {
-                    // API 응답의 balance를 사용하거나, RefreshUserAsync 후 GetBalanceAsync 호출
-                    if (authResult.balance.HasValue)
-                    {
-                        balance = authResult.balance.Value;
-                    }
-                    else
-                    {
-                        await AuthService.RefreshUserAsync();
-                        balance = await GameService.GetBalanceAsync();
-                    }
-                    timeLeft = await GameService.GetTimeUntilNextRoundAsync();
-                    currentResult = await GameService.GetCurrentOddEvenResultAsync();
-                    bets = await GameService.GetOddEvenBetsAsync(authResult.userId.Value);
-                    lastRoundTime = DateTime.Now;
-                    InitializeTimer();
-                    StartTimer();
-                    StateHasChanged();
-                }
-            }
-        }
-        catch { }
-    }
-
-    private class AuthCheckResult
-    {
-        public bool success { get; set; }
-        public bool authenticated { get; set; }
-        public int? userId { get; set; }
-        public string? username { get; set; }
-        public decimal? balance { get; set; }
-    }
-
-    private async Task LoadData()
-    {
-        // 사용자 정보를 최신화한 후 잔액 로드
-        await AuthService.RefreshUserAsync();
-        if (AuthService.CurrentUser != null)
-        {
-            balance = AuthService.CurrentUser.Balance;
-        }
-        else
-        {
-            balance = await GameService.GetBalanceAsync();
-        }
-        timeLeft = await GameService.GetTimeUntilNextRoundAsync();
-        currentResult = await GameService.GetCurrentOddEvenResultAsync();
-                        // userId 가져오기
-                        int? userId = null;
-                        if (AuthService.CurrentUser != null)
-                        {
-                            userId = AuthService.CurrentUser.Id;
-                        }
-                        else
-                        {
-                            try
-                            {
-                                var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-                                if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
-                                {
-                                    userId = authResult.userId.Value;
-                                }
-                            }
-                            catch { }
-                        }
-                        bets = await GameService.GetOddEvenBetsAsync(userId);
-        lastRoundTime = DateTime.Now;
-        StateHasChanged();
-    }
-
-    private void InitializeTimer()
-    {
-        // 초기 시간 계산
-        var now = DateTime.Now;
-        var secondsSinceEpoch = (long)(now - new DateTime(1970, 1, 1)).TotalSeconds;
-        var currentRound = secondsSinceEpoch / 30;
-        var nextRoundTime = (currentRound + 1) * 30;
-        var nextRoundDateTime = new DateTime(1970, 1, 1).AddSeconds(nextRoundTime);
-        timeLeft = (int)(nextRoundDateTime - now).TotalSeconds;
-        if (timeLeft <= 0) timeLeft = 30;
-    }
-
-    private void StartTimer()
-    {
-        timer = new System.Threading.Timer(async _ =>
-        {
-            await InvokeAsync(async () =>
-            {
-                // 클라이언트 측에서 직접 계산
-                var now = DateTime.Now;
-                var secondsSinceEpoch = (long)(now - new DateTime(1970, 1, 1)).TotalSeconds;
-                var currentRound = secondsSinceEpoch / 30;
-                var nextRoundTime = (currentRound + 1) * 30;
-                var nextRoundDateTime = new DateTime(1970, 1, 1).AddSeconds(nextRoundTime);
-                var newTimeLeft = (int)(nextRoundDateTime - now).TotalSeconds;
-                
-                if (newTimeLeft <= 0)
-                {
-                    newTimeLeft = 30;
-                }
-
-                var previousTimeLeft = timeLeft;
-                timeLeft = newTimeLeft;
-
-                // 라운드가 바뀌었는지 확인 (30에서 29로 넘어갈 때)
-                if (previousTimeLeft == 30 && newTimeLeft < 30)
-                {
-                    // 새 라운드 시작 - 서버에서 데이터 새로고침
-                    currentResult = await GameService.GetCurrentOddEvenResultAsync();
-                    
-                    // 잔액 즉시 업데이트
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await AuthService.RefreshUserAsync();
-                            if (AuthService.CurrentUser != null)
-                            {
-                                await InvokeAsync(() =>
-                                {
-                                    balance = AuthService.CurrentUser.Balance;
-                                    StateHasChanged();
-                                });
-                            }
-                            
-                            // userId 가져오기
-                            int? userId3 = null;
-                            if (AuthService.CurrentUser != null)
-                            {
-                                userId3 = AuthService.CurrentUser.Id;
-                            }
-                            else
-                            {
-                                try
-                                {
-                                    var authResult4 = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-                                    if (authResult4 != null && authResult4.authenticated && authResult4.userId.HasValue)
-                                    {
-                                        userId3 = authResult4.userId.Value;
-                                    }
-                                }
-                                catch { }
-                            }
-                            
-                            var updatedBets = await GameService.GetOddEvenBetsAsync(userId3);
-                            await InvokeAsync(() =>
-                            {
-                                bets = updatedBets;
-                                StateHasChanged();
-                            });
-                        }
-                        catch { }
-                    });
-                }
-
-                StateHasChanged();
-            });
-        }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
-    }
-
-    private void OnBetAmountInput(ChangeEventArgs e)
-    {
-        if (decimal.TryParse(e.Value?.ToString(), out var amount))
-        {
-            betAmount = amount;
-            StateHasChanged();
-        }
-    }
-
-    private void SetBetAmount(decimal percentage)
-    {
-        if (balance > 0)
-        {
-            betAmount = Math.Floor(balance * percentage / 1000) * 1000; // 1000원 단위로 내림
-            if (betAmount < 1000) betAmount = 1000; // 최소 1000원
-            StateHasChanged();
-        }
-    }
-
-    private void SelectOdd()
-    {
-        selectedChoice = "홀";
-        StateHasChanged();
-    }
-
-    private void SelectEven()
-    {
-        selectedChoice = "짝";
-        StateHasChanged();
-    }
-
-    private bool IsBetDisabled()
-    {
-        return string.IsNullOrEmpty(selectedChoice) || betAmount <= 0 || timeLeft < 5 || isLoading;
-    }
-
-    private async Task PlaceBet()
-    {
-        if (string.IsNullOrEmpty(selectedChoice) || betAmount <= 0) return;
-        
-        try
-        {
-            // 베팅 전에 사용자 정보 다시 로드 - 여러 방법으로 시도
-            if (AuthService.CurrentUser == null)
-            {
-                // 1. 세션에서 로드 시도
-                await AuthService.LoadUserFromSessionAsync();
-                
-                // 2. 여전히 null이면 API를 통해 로드
-                if (AuthService.CurrentUser == null)
-                {
-                    try
-                    {
-                        var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-                        if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
-                        {
-                            await AuthService.LoadUserByIdAsync(authResult.userId.Value);
-                        }
-                    }
-                    catch { }
-                }
-            }
-            
-            // 잔액 확인 - CurrentUser가 null이어도 API에서 잔액을 받았으면 사용
-            decimal currentBalance = 0;
-            if (AuthService.CurrentUser != null)
-            {
-                currentBalance = AuthService.CurrentUser.Balance;
-            }
-            else
-            {
-                // API를 통해 잔액 가져오기
-                try
-                {
-                    var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-                    if (authResult != null && authResult.authenticated && authResult.balance.HasValue)
-                    {
-                        currentBalance = authResult.balance.Value;
-                    }
-                    else
-                    {
-                        isLoading = false;
-                        StateHasChanged();
-                        return;
-                    }
-                }
-                catch
-                {
-                    isLoading = false;
-                    StateHasChanged();
-                    return;
-                }
-            }
-            
-            if (currentBalance < betAmount)
-            {
-                await AuthService.RefreshUserAsync();
-                if (AuthService.CurrentUser != null)
-                {
-                    currentBalance = AuthService.CurrentUser.Balance;
-                }
-            }
-            
-            if (currentBalance < betAmount)
-            {
-                isLoading = false;
-                balance = currentBalance;
-                StateHasChanged();
-                return;
-            }
-            
-            // API에서 userId 가져오기 (CurrentUser가 null인 경우)
-            int? userId = null;
-            if (AuthService.CurrentUser != null)
-            {
-                userId = AuthService.CurrentUser.Id;
-            }
-            else
-            {
-                try
-                {
-                    var authResult = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-                    if (authResult != null && authResult.authenticated && authResult.userId.HasValue)
-                    {
-                        userId = authResult.userId.Value;
-                    }
-                }
-                catch { }
-            }
-            
-            var success = await GameService.PlaceOddEvenBetAsync(selectedChoice, betAmount, userId);
-            if (success)
-            {
-                // 즉시 UI 업데이트
-                balance -= betAmount;
-                selectedChoice = "";
-                betAmount = 0;
-                StateHasChanged();
-                
-                // 백그라운드에서 정확한 잔액과 데이터 업데이트
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        // 잔액 업데이트 (베팅 후 차감된 잔액)
-                        await AuthService.RefreshUserAsync();
-                        if (AuthService.CurrentUser != null)
-                        {
-                            await InvokeAsync(() =>
-                            {
-                                balance = AuthService.CurrentUser.Balance;
-                                StateHasChanged();
-                            });
-                        }
-                        
-                        // 나머지 데이터 로드
-                        var newTimeLeft = await GameService.GetTimeUntilNextRoundAsync();
-                        var newCurrentResult = await GameService.GetCurrentOddEvenResultAsync();
-                        
-                        // userId 가져오기
-                        int? userIdForBets = userId;
-                        if (userIdForBets == null)
-                        {
-                            if (AuthService.CurrentUser != null)
-                            {
-                                userIdForBets = AuthService.CurrentUser.Id;
-                            }
-                            else
-                            {
-                                try
-                                {
-                                    var authResult5 = await JSRuntime.InvokeAsync<AuthCheckResult>("checkAuth");
-                                    if (authResult5 != null && authResult5.authenticated && authResult5.userId.HasValue)
-                                    {
-                                        userIdForBets = authResult5.userId.Value;
-                                    }
-                                }
-                                catch { }
-                            }
-                        }
-                        
-                        var updatedBets = await GameService.GetOddEvenBetsAsync(userIdForBets);
-                        await InvokeAsync(() =>
-                        {
-                            timeLeft = newTimeLeft;
-                            currentResult = newCurrentResult;
-                            bets = updatedBets;
-                            lastRoundTime = DateTime.Now;
-                            StateHasChanged();
-                        });
-                    }
-                    catch { }
-                });
-            }
-            else
-            {
-                // 베팅 실패 시 잔액 다시 로드
-                await AuthService.RefreshUserAsync();
-                if (AuthService.CurrentUser != null)
-                {
-                    balance = AuthService.CurrentUser.Balance;
-                }
-                StateHasChanged();
-            }
-        }
-        catch
-        {
-            // 에러 발생 시에도 UI 업데이트
-            StateHasChanged();
-        }
-    }
-
-    private void NavigateToLogin()
-    {
-        Navigation.NavigateTo("/login");
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (timer != null)
-        {
-            await timer.DisposeAsync();
-        }
+        ViewModel.StateChanged -= OnViewModelStateChanged;
+        ViewModel.Dispose();
     }
 }
+

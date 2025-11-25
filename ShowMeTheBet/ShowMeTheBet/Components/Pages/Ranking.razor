@@ -1,10 +1,8 @@
 @page "/ranking"
 @using ShowMeTheBet.Models
-@using ShowMeTheBet.Services
-@inject BettingService BettingService
-@inject AuthService AuthService
-@inject NavigationManager Navigation
+@inject ShowMeTheBet.ViewModels.Page.RankingViewModel ViewModel
 @rendermode InteractiveServer
+@implements IDisposable
 
 <PageTitle>부자랭킹 - ShowMeTheBet</PageTitle>
 
@@ -15,13 +13,13 @@
     </div>
 
     <div class="ranking-content">
-        @if (rankings == null)
+        @if (ViewModel.Rankings == null)
         {
             <div class="loading">
                 <p>로딩 중...</p>
             </div>
         }
-        else if (rankings.Count == 0)
+        else if (ViewModel.Rankings.Count == 0)
         {
             <div class="empty-ranking">
                 <p>랭킹 데이터가 없습니다.</p>
@@ -30,11 +28,11 @@
         else
         {
             <div class="ranking-list">
-                @for (int i = 0; i < rankings.Count; i++)
+                @for (int i = 0; i < ViewModel.Rankings.Count; i++)
                 {
-                    var user = rankings[i];
+                    var user = ViewModel.Rankings[i];
                     var rank = i + 1;
-                    var isCurrentUser = AuthService.IsAuthenticated && AuthService.CurrentUser?.Id == user.Id;
+                    var isCurrentUser = ViewModel.IsCurrentUser(user);
                     
                     <div class="ranking-item @(isCurrentUser ? "current-user" : "")">
                         <div class="rank-number">
@@ -71,16 +69,18 @@
 </div>
 
 @code {
-    private List<User>? rankings;
-
     protected override async Task OnInitializedAsync()
     {
-        await LoadRankings();
+        ViewModel.StateChanged += OnViewModelStateChanged;
+        await ViewModel.InitializeAsync();
     }
 
-    private async Task LoadRankings()
+    private void OnViewModelStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
     {
-        rankings = await BettingService.GetUserRankingsAsync();
+        ViewModel.StateChanged -= OnViewModelStateChanged;
+        ViewModel.Dispose();
     }
 }
 

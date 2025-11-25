@@ -8,15 +8,53 @@ using Microsoft.Extensions.Hosting;
 
 namespace ShowMeTheBet.Services;
 
+/// <summary>
+/// 사용자 인증 및 세션 관리를 담당하는 서비스 클래스
+/// 로그인, 로그아웃, 사용자 정보 관리, 세션/쿠키 관리 등의 기능을 제공합니다.
+/// IIS 환경에서 안정적으로 작동하도록 쿠키와 세션을 모두 사용합니다.
+/// </summary>
 public class AuthService
 {
+    #region Private Fields
+    /// <summary>
+    /// 데이터베이스 컨텍스트 - 사용자 정보 조회 및 저장
+    /// </summary>
     private readonly BettingDbContext _context;
+    
+    /// <summary>
+    /// HTTP 컨텍스트 접근자 - 세션 및 쿠키 접근용
+    /// </summary>
     private readonly IHttpContextAccessor _httpContextAccessor;
+    
+    /// <summary>
+    /// 로거 - 디버깅 및 오류 추적용
+    /// </summary>
     private readonly ILogger<AuthService>? _logger;
+    
+    /// <summary>
+    /// 웹 호스트 환경 정보
+    /// </summary>
     private readonly IWebHostEnvironment? _environment;
+    
+    /// <summary>
+    /// 현재 로그인한 사용자 정보 (캐시)
+    /// </summary>
     private User? _currentUser;
+    
+    /// <summary>
+    /// 사용자 정보가 로드되었는지 여부 (중복 로드 방지)
+    /// </summary>
     private bool _userLoaded = false;
+    #endregion
 
+    #region Constructor
+    /// <summary>
+    /// AuthService 생성자
+    /// </summary>
+    /// <param name="context">데이터베이스 컨텍스트</param>
+    /// <param name="httpContextAccessor">HTTP 컨텍스트 접근자</param>
+    /// <param name="logger">로거 (선택사항)</param>
+    /// <param name="environment">웹 호스트 환경 (선택사항)</param>
     public AuthService(BettingDbContext context, IHttpContextAccessor httpContextAccessor, ILogger<AuthService>? logger = null, IWebHostEnvironment? environment = null)
     {
         _context = context;
@@ -24,7 +62,14 @@ public class AuthService
         _logger = logger;
         _environment = environment;
     }
+    #endregion
 
+    #region Public Properties
+    /// <summary>
+    /// 현재 로그인한 사용자 정보를 반환하는 속성
+    /// 쿠키에서 UserId를 읽어서 사용자 정보를 로드합니다.
+    /// IIS 환경에서 안정적으로 작동하도록 쿠키를 우선적으로 사용합니다.
+    /// </summary>
     public User? CurrentUser
     {
         get
@@ -83,6 +128,10 @@ public class AuthService
         }
     }
 
+    /// <summary>
+    /// 현재 사용자가 인증되었는지 여부를 반환하는 속성
+    /// CurrentUser가 null이 아니면 인증된 것으로 간주합니다.
+    /// </summary>
     public bool IsAuthenticated
     {
         get
@@ -95,8 +144,23 @@ public class AuthService
         }
     }
 
+    /// <summary>
+    /// 인증 상태가 변경될 때 발생하는 이벤트
+    /// 로그인/로그아웃 시 UI 업데이트를 위해 사용됩니다.
+    /// </summary>
     public event Action? OnAuthStateChanged;
+    #endregion
 
+    #region Public Methods
+
+    /// <summary>
+    /// 새 사용자를 등록합니다.
+    /// 사용자명과 이메일이 중복되지 않아야 합니다.
+    /// </summary>
+    /// <param name="username">사용자명</param>
+    /// <param name="email">이메일</param>
+    /// <param name="password">비밀번호 (BCrypt로 해시화되어 저장됨)</param>
+    /// <returns>등록 성공 여부 (중복된 사용자명/이메일이 있으면 false)</returns>
     public async Task<bool> RegisterAsync(string username, string email, string password)
     {
         if (await _context.Users.AnyAsync(u => u.Username == username || u.Email == email))
@@ -118,6 +182,11 @@ public class AuthService
         return true;
     }
 
+    #region Private Methods
+    /// <summary>
+    /// 세션/쿠키에서 사용자 정보를 로드하는 내부 메서드 (동기 버전)
+    /// 쿠키를 먼저 확인하고, 없으면 세션에서 확인합니다.
+    /// </summary>
     private void LoadUserFromSession()
     {
         if (_userLoaded && _currentUser != null) return;
@@ -182,6 +251,11 @@ public class AuthService
         _userLoaded = true;
     }
 
+    /// <summary>
+    /// 세션/쿠키에서 사용자 정보를 로드하는 비동기 메서드
+    /// 쿠키를 먼저 확인하고, 없으면 세션에서 확인합니다.
+    /// IIS 환경에서 안정적으로 작동하도록 여러 번 재시도합니다.
+    /// </summary>
     public async Task LoadUserFromSessionAsync()
     {
         // ResetUserLoad가 호출된 경우 강제로 다시 로드
@@ -278,6 +352,13 @@ public class AuthService
         _userLoaded = true;
     }
 
+    /// <summary>
+    /// 사용자 로그인을 처리합니다.
+    /// 비밀번호는 BCrypt로 검증하고, 로그인 성공 시 세션과 쿠키에 UserId를 저장합니다.
+    /// </summary>
+    /// <param name="username">사용자명</param>
+    /// <param name="password">비밀번호</param>
+    /// <returns>로그인 성공 여부</returns>
     public async Task<bool> LoginAsync(string username, string password)
     {
         _logger?.LogInformation("로그인 시도: {Username}", username);
@@ -381,6 +462,10 @@ public class AuthService
         return true;
     }
 
+    /// <summary>
+    /// 사용자 로그아웃을 처리합니다.
+    /// 세션과 쿠키를 모두 삭제하고 CurrentUser를 null로 설정합니다.
+    /// </summary>
     public void Logout()
     {
         _currentUser = null;
@@ -431,11 +516,21 @@ public class AuthService
         OnAuthStateChanged?.Invoke();
     }
 
+    /// <summary>
+    /// 사용자 ID로 사용자 정보를 조회합니다.
+    /// </summary>
+    /// <param name="userId">사용자 ID</param>
+    /// <returns>사용자 정보 (없으면 null)</returns>
     public async Task<User?> GetUserAsync(int userId)
     {
         return await _context.Users.FindAsync(userId);
     }
 
+    /// <summary>
+    /// 현재 사용자 정보를 데이터베이스에서 최신화합니다.
+    /// 잔액 등 변경된 정보를 반영하기 위해 사용됩니다.
+    /// Entity Framework의 변경 추적을 초기화하여 최신 데이터를 가져옵니다.
+    /// </summary>
     public async Task RefreshUserAsync()
     {
         if (!_userLoaded)
@@ -465,12 +560,22 @@ public class AuthService
         }
     }
 
+    /// <summary>
+    /// 사용자 로드 상태를 초기화합니다.
+    /// 다음에 CurrentUser를 접근할 때 다시 로드하도록 합니다.
+    /// </summary>
     public void ResetUserLoad()
     {
         _userLoaded = false;
         _currentUser = null;
     }
 
+    /// <summary>
+    /// 사용자 ID로 사용자 정보를 로드하고 CurrentUser에 설정합니다.
+    /// Entity Framework의 변경 추적을 초기화하여 최신 데이터를 가져옵니다.
+    /// </summary>
+    /// <param name="userId">사용자 ID</param>
+    /// <returns>로드 성공 여부</returns>
     public async Task<bool> LoadUserByIdAsync(int userId)
     {
         try
@@ -524,5 +629,7 @@ public class AuthService
             return false;
         }
     }
+    #endregion
+    #endregion
 }
 

@@ -1,82 +1,92 @@
 @page "/register"
-@using ShowMeTheBet.Services
-@using Microsoft.JSInterop
-@inject AuthService AuthService
-@inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
+@inject ShowMeTheBet.Services.AuthPageService AuthPageService
 @rendermode InteractiveServer
 
-<PageTitle>회원가입 - ShowMeTheBet</PageTitle>
+<PageTitle>회원가입 - 도토리</PageTitle>
 
-<div class="login-container">
-    <div class="login-card">
-        <div class="login-header">
-            <h1>⚽ ShowMeTheBet</h1>
-            <p class="text-muted">새 계정을 만들어보세요</p>
+<div class="register-page">
+    <div class="register-card">
+        <div class="register-side">
+            <h1>새로운 베팅 여정을 시작하세요</h1>
+            <p>맞춤형 게임 경험을 즐기고 실시간 배당을 확인해보세요.</p>
+            <ul>
+                <li>실시간 그래프 &amp; 홀짝 게임</li>
+                <li>스포츠 경기 라이브 베팅</li>
+                <li>보안 강화된 자산 관리</li>
+                <li>* 본 페이지는 건강한 베팅 놀이터 입니다.</li>
+            </ul>
         </div>
 
-        @if (!string.IsNullOrEmpty(errorMessage))
-        {
-            <div class="alert alert-danger" role="alert">
-                @errorMessage
+        <div class="register-form">
+            <div class="register-header">
+                <h2>회원가입</h2>
+                <p class="text-muted">아래 정보를 입력해 새 계정을 만들어보세요.</p>
             </div>
-        }
 
-        @if (!string.IsNullOrEmpty(successMessage))
-        {
-            <div class="alert alert-success" role="alert">
-                @successMessage
-            </div>
-        }
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger" role="alert">
+                    @errorMessage
+                </div>
+            }
 
-        <div class="login-form">
-            <h3>회원가입</h3>
-            <div class="mb-3">
+            @if (!string.IsNullOrEmpty(successMessage))
+            {
+                <div class="alert alert-success" role="alert">
+                    @successMessage
+                </div>
+            }
+
+            <div class="form-group">
                 <label for="username" class="form-label">사용자명</label>
-                <input type="text" 
-                       class="form-control" 
-                       id="username" 
-                       @bind="username" 
+                <input type="text"
+                       class="form-control"
+                       id="username"
+                       @bind="username"
                        @bind:event="oninput"
-                       placeholder="사용자명을 입력하세요" 
+                       placeholder="사용자명을 입력하세요"
                        required />
                 <small class="form-text text-muted">3-20자, 영문, 숫자, 언더스코어만 사용 가능</small>
             </div>
-            <div class="mb-3">
+
+            <div class="form-group">
                 <label for="email" class="form-label">이메일</label>
-                <input type="email" 
-                       class="form-control" 
-                       id="email" 
-                       @bind="email" 
+                <input type="email"
+                       class="form-control"
+                       id="email"
+                       @bind="email"
                        @bind:event="oninput"
-                       placeholder="이메일을 입력하세요" 
+                       placeholder="이메일을 입력하세요"
                        required />
             </div>
-            <div class="mb-3">
+
+            <div class="form-group">
                 <label for="password" class="form-label">비밀번호</label>
-                <input type="password" 
-                       class="form-control" 
-                       id="password" 
-                       @bind="password" 
+                <input type="password"
+                       class="form-control"
+                       id="password"
+                       @bind="password"
                        @bind:event="oninput"
-                       placeholder="비밀번호를 입력하세요" 
+                       placeholder="비밀번호를 입력하세요"
                        required />
                 <small class="form-text text-muted">최소 6자 이상</small>
             </div>
-            <div class="mb-3">
+
+            <div class="form-group">
                 <label for="passwordConfirm" class="form-label">비밀번호 확인</label>
-                <input type="password" 
-                       class="form-control" 
-                       id="passwordConfirm" 
-                       @bind="passwordConfirm" 
+                <input type="password"
+                       class="form-control"
+                       id="passwordConfirm"
+                       @bind="passwordConfirm"
                        @bind:event="oninput"
-                       placeholder="비밀번호를 다시 입력하세요" 
+                       placeholder="비밀번호를 다시 입력하세요"
                        required />
                 @if (!string.IsNullOrEmpty(password) && !string.IsNullOrEmpty(passwordConfirm) && password != passwordConfirm)
                 {
                     <small class="form-text text-danger">비밀번호가 일치하지 않습니다</small>
                 }
             </div>
+
             <button class="btn btn-primary w-100 mb-3" @onclick="HandleRegister" disabled="@(isLoading || !IsFormValid())">
                 @if (isLoading)
                 {
@@ -84,6 +94,7 @@
                 }
                 회원가입
             </button>
+
             <div class="text-center">
                 <p class="mb-0">이미 계정이 있으신가요? <a href="/login">로그인</a></p>
             </div>
@@ -102,14 +113,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // 세션에서 사용자 정보 로드
-        AuthService.ResetUserLoad();
-        await AuthService.LoadUserFromSessionAsync();
-        
-        if (AuthService.IsAuthenticated)
-        {
-            Navigation.NavigateTo("/game");
-        }
+        await AuthPageService.RedirectIfAuthenticatedAsync("/game", reloadSession: true);
     }
 
     private bool IsFormValid()
@@ -129,87 +133,17 @@
         errorMessage = string.Empty;
         successMessage = string.Empty;
 
-        // 유효성 검사
-        if (string.IsNullOrWhiteSpace(username))
-        {
-            errorMessage = "사용자명을 입력해주세요.";
-            return;
-        }
-
-        if (username.Length < 3 || username.Length > 20)
-        {
-            errorMessage = "사용자명은 3-20자 사이여야 합니다.";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(email))
-        {
-            errorMessage = "이메일을 입력해주세요.";
-            return;
-        }
-
-        if (!email.Contains("@") || !email.Contains("."))
-        {
-            errorMessage = "올바른 이메일 형식을 입력해주세요.";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(password))
-        {
-            errorMessage = "비밀번호를 입력해주세요.";
-            return;
-        }
-
-        if (password.Length < 6)
-        {
-            errorMessage = "비밀번호는 최소 6자 이상이어야 합니다.";
-            return;
-        }
-
-        if (password != passwordConfirm)
-        {
-            errorMessage = "비밀번호가 일치하지 않습니다.";
-            return;
-        }
-
         isLoading = true;
-        try
+        var result = await AuthPageService.RegisterAsync(username, email, password, passwordConfirm);
+        isLoading = false;
+
+        if (result.Success)
         {
-            var success = await AuthService.RegisterAsync(username, email, password);
-            if (success)
-            {
-                successMessage = "회원가입이 완료되었습니다! 로그인 페이지로 이동합니다...";
-                
-                // 2초 후 자동 로그인 시도
-                await Task.Delay(2000);
-                
-                var loginSuccess = await AuthService.LoginAsync(username, password);
-                if (loginSuccess)
-                {
-                    // 세션이 확실히 저장되도록 대기
-                    await Task.Delay(500);
-                    
-                    // JavaScript로 강제 페이지 리로드하여 게임 선택 페이지로 이동
-                    await JSRuntime.InvokeVoidAsync("navigateToGame");
-                    return; // 페이지 이동하므로 여기서 종료
-                }
-                else
-                {
-                    Navigation.NavigateTo("/login");
-                }
-            }
-            else
-            {
-                errorMessage = "이미 존재하는 사용자명 또는 이메일입니다.";
-            }
+            successMessage = result.SuccessMessage ?? "회원가입이 완료되었습니다!";
         }
-        catch (Exception ex)
+        else
         {
-            errorMessage = "회원가입 중 오류가 발생했습니다: " + ex.Message;
-        }
-        finally
-        {
-            isLoading = false;
+            errorMessage = result.ErrorMessage ?? "회원가입 중 오류가 발생했습니다.";
         }
     }
 }
